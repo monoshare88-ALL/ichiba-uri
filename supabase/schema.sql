@@ -39,6 +39,7 @@ create table if not exists ago_rows (
   tkb               boolean not null default false,
   broken            boolean not null default false,
   copy              boolean not null default false,
+  campaign          text,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );

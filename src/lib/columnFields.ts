@@ -46,6 +46,7 @@ export interface ResolverRow {
   salePrice: string;
   saleAmount: string;
   fee: string;
+  campaign: string;
   lotNo: string;
   boxNo: string;
   kintoneTitle: string;
@@ -157,54 +158,17 @@ export const DEFAULT_FORMAT_COLUMNS = [
 ];
 
 /**
- * コメ兵プリセット: 社内用 (21列)
+ * 市場名からプリセットフォーマットを取得
+ * marketProfiles.ts を正規のデータソースとして使用
  */
-export const KOMEHYO_INTERNAL_COLUMNS: import("@/app/api/settings/route").ColumnDef[] = [
-  { header: "箱番、枝番",     field: "BOX_NO",                    width: 10 },
-  { header: "ロットNo",       field: "LOT_NO",                    width: 10 },
-  { header: "自社出品",       field: "LISTING_NUMBER",            width: 10 },
-  { header: "ブランド",       field: "BRAND",                     width: 14 },
-  { header: "ブランド名",     field: "ITEM_NAME",                 width: 30 },
-  { header: "付属品",         field: "ACCESSORIES",               width: 22 },
-  { header: "状態",           field: "CONDITION_WITH_FLAGS",      width: 22 },
-  { header: "指値(円)",       field: "RESERVE_PRICE",             width: 10 },
-  { header: "バイヤー",       field: "BUYER",                     width: 10 },
-  { header: "買値",           field: "PURCHASE_PRICE",            width: 12 },
-  { header: "買値税込み",     field: "PURCHASE_PRICE_TAX_INCL",   width: 12 },
-  { header: "商品番号",       field: "ITEM_NUMBER",               width: 12 },
-  { header: "バイヤー２",     field: "EMPTY",                     width: 10 },
-  { header: "",               field: "EMPTY",                     width: 6 },
-  { header: "売り金額",       field: "SALE_AMOUNT",               width: 12 },
-  { header: "手数料",         field: "FEE",                       width: 10 },
-  { header: "キャンペーン",   field: "EMPTY",                     width: 10 },
-  { header: "売り金額 税込み", field: "SALE_AMOUNT_TAX_INCL",     width: 12 },
-  { header: "手数料 　税込み", field: "FEE_TAX_INCL",             width: 12 },
-  { header: "",               field: "EMPTY",                     width: 6 },
-  { header: "粗利",           field: "GROSS_PROFIT",              width: 12 },
-];
+import { getMarketProfile } from "./marketProfiles";
 
-/**
- * コメ兵プリセット: 提出用あご表 (7列)
- */
-export const KOMEHYO_SUBMISSION_COLUMNS: import("@/app/api/settings/route").ColumnDef[] = [
-  { header: "箱番、枝番",     field: "EMPTY",                     width: 10 },
-  { header: "ロットNo",       field: "EMPTY",                     width: 10 },
-  { header: "自社出品",       field: "LISTING_NUMBER",            width: 10 },
-  { header: "ブランド",       field: "BRAND",                     width: 14 },
-  { header: "モデル名",       field: "ITEM_NAME",                 width: 30 },
-  { header: "付属品その他",   field: "ACCESSORIES",               width: 22 },
-  { header: "指値(円)",       field: "RESERVE_PRICE",             width: 10 },
-];
-
-/**
- * 市場名からプリセットフォーマットを取得 (未登録市場は undefined)
- */
-export function getMarketPreset(market: string): { internal?: import("@/app/api/settings/route").ColumnDef[]; submission?: import("@/app/api/settings/route").ColumnDef[] } | undefined {
-  if (market === "コメ兵") {
-    return {
-      internal: KOMEHYO_INTERNAL_COLUMNS,
-      submission: KOMEHYO_SUBMISSION_COLUMNS,
-    };
-  }
-  return undefined;
+export function getMarketPreset(market: string): { internal?: import("@/app/api/settings/route").ColumnDef[]; submission?: import("@/app/api/settings/route").ColumnDef[]; salesImport?: import("@/app/api/settings/route").ColumnDef[] } | undefined {
+  const profile = getMarketProfile(market);
+  if (!profile) return undefined;
+  return {
+    internal: profile.internalColumns,
+    submission: profile.submissionColumns,
+    salesImport: profile.salesImport.columns,
+  };
 }

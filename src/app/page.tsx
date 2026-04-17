@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import BarcodeScanner from "@/components/BarcodeScanner";
 import { getS3ImageUrl } from "@/lib/s3ImageUrl";
 import { resolveColumnValue, DEFAULT_FORMAT_COLUMNS, getMarketPreset, type ResolverRow } from "@/lib/columnFields";
@@ -57,6 +57,7 @@ interface RowData {
   salePrice: string;      // 販売価格
   saleAmount: string;     // 売り金額 (実際に売れた金額)
   fee: string;            // 手数料
+  campaign: string;       // キャンペーンキャッシュバック
   lotNo: string;
   boxNo: string;
   imageUrl: string;       // 代表画像 (x.jpg)
@@ -87,6 +88,7 @@ const emptyRow = (): RowData => ({
   salePrice: "",
   saleAmount: "",
   fee: "",
+  campaign: "",
   lotNo: "",
   boxNo: "",
   imageUrl: "",
@@ -146,6 +148,7 @@ const dbToRow = (r: Record<string, unknown>): RowData => ({
   salePrice: (r.sale_price as string) || "",
   saleAmount: (r.sale_amount as string) || "",
   fee: (r.fee as string) || "",
+  campaign: (r.campaign as string) || "",
   lotNo: (r.lot_no as string) || "",
   boxNo: (r.box_no as string) || "",
   imageUrl: (r.image_url as string) || "",
@@ -174,6 +177,7 @@ const rowToDb = (r: RowData) => ({
   sale_price: r.salePrice || null,
   sale_amount: r.saleAmount || null,
   fee: r.fee || null,
+  campaign: r.campaign || null,
   lot_no: r.lotNo || null,
   box_no: r.boxNo || null,
   image_url: r.imageUrl || null,
@@ -589,7 +593,7 @@ export default function Home() {
       }
 
       // rows state にマージ
-      type Result = { listingNumber: string; itemNumber: string; saleAmount: string; fee: string };
+      type Result = { listingNumber: string; itemNumber: string; saleAmount: string; fee: string; campaign: string };
       const results: Result[] = data.results || [];
       let matched = 0;
       let updated = 0;
@@ -608,6 +612,7 @@ export default function Home() {
           const patch: Partial<RowData> = {};
           if (m.saleAmount && m.saleAmount !== r.saleAmount) patch.saleAmount = m.saleAmount;
           if (m.fee && m.fee !== r.fee) patch.fee = m.fee;
+          if (m.campaign && m.campaign !== r.campaign) patch.campaign = m.campaign;
           if (Object.keys(patch).length > 0) updated++;
           return { ...r, ...patch };
         })
@@ -628,7 +633,7 @@ export default function Home() {
           `ファイルから抽出: ${results.length} 行\n` +
           `マッチ: ${matched} 行 / 更新: ${updated} 行\n` +
           `未マッチ: ${unmatched.length} 行\n` +
-          `形式: ${data.mode === "format" ? `保存設定 (${data.formatName || settings.market || "-"})` : "自動検出"}`
+          `形式: ${data.mode === "profile" ? `プロファイル (${data.profileName || settings.market || "-"})` : "自動検出"}`
       );
     } catch (err) {
       alert(`取込エラー: ${err}`);
@@ -907,6 +912,7 @@ export default function Home() {
         salePrice: r.salePrice,
         saleAmount: r.saleAmount,
         fee: r.fee,
+        campaign: r.campaign,
         lotNo: r.lotNo,
         boxNo: r.boxNo,
         // タイトル fallback (Gemini→Kintone→ロットNo)
@@ -1643,32 +1649,26 @@ export default function Home() {
             <div className="flex flex-wrap items-center gap-3">
               <label className="btn btn-primary cursor-pointer">
                 📥 売上取込
-                {(() => {
-                  const m = settings.market;
-                  const name = m ? settings.marketFormats?.[m]?.salesImport?.name : undefined;
-                  return name ? <span className="ml-1 text-[10px] opacity-80">({name})</span> : null;
-                })()}
+                {settings.market && (
+                  <span className="ml-1 text-[10px] opacity-80">({settings.market})</span>
+                )}
                 <input
                   type="file"
-                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                   onChange={handleSalesImportFile}
                   className="hidden"
                 />
               </label>
               <span className="text-[11px] text-[var(--fg-muted)] leading-snug">
-                市場から受領したExcelの<strong>売り金額・手数料</strong>を、
+                市場から受領したExcel/CSVの<strong>売り金額・手数料</strong>を、
                 出品番号または商品番号で一致する行に反映します。
-                {settings.market && settings.marketFormats?.[settings.market]?.salesImport ? (
-                  <>
-                    {" "}形式:{" "}
-                    <strong>
-                      {settings.marketFormats[settings.market].salesImport?.name || "保存済み"}
-                    </strong>{" "}
-                    ({settings.marketFormats[settings.market].salesImport?.columns?.length ?? 0}列)
-                  </>
+                {settings.market ? (
+                  <span className="text-[var(--fg-subtle)]">
+                    {" "}プロファイル: <strong>{settings.market}</strong>
+                  </span>
                 ) : (
                   <span className="text-[var(--fg-subtle)]">
-                    {" "}(市場「{settings.market || "未設定"}」の形式未設定 — 自動検出で取込みます。設定画面の「市場別Excel形式 / 売上取込」から列マッピングを保存できます)
+                    {" "}(市場未設定 — 自動検出で取込みます)
                   </span>
                 )}
               </span>
@@ -1689,24 +1689,34 @@ export default function Home() {
                     <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">バイヤー</th>
                     <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">売り金額</th>
                     <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">手数料</th>
+                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">キャンペーン</th>
+                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">不落札手数料</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.filter(r => r.itemNumber).length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-6 py-16 text-center text-[var(--fg-muted)] text-sm">
+                      <td colSpan={11} className="px-6 py-16 text-center text-[var(--fg-muted)] text-sm">
                         出品タブで商品を登録すると、ここに売上入力欄が表示されます。
                       </td>
                     </tr>
                   )}
-                  {rows.filter(r => r.itemNumber).map((row) => {
+                  {(() => {
+                    const salesRows = rows.filter(r => r.itemNumber);
+                    const totalSaleAmount = salesRows.reduce((sum, r) => sum + (parseFloat(r.saleAmount) || 0), 0);
+                    const totalFee = salesRows.reduce((sum, r) => sum + (parseFloat(r.fee) || 0), 0);
+                    const totalCampaign = salesRows.reduce((sum, r) => sum + (parseFloat(r.campaign) || 0), 0);
+                    const getUnsoldFee = (r: RowData) => (r.saleAmount === "0" || r.saleAmount === "") ? 500 : 0;
+                    const totalUnsoldFee = salesRows.reduce((sum, r) => sum + getUnsoldFee(r), 0);
+                    return salesRows.map((row, _idx, arr) => {
                     const titleText =
                       row.geminiTitle?.trim() ||
                       row.kintoneTitle?.trim() ||
                       row.itemName ||
                       "-";
-                    return (
-                      <tr key={row.id} className="border-t border-[var(--border)] hover:bg-[var(--surface-hover)] transition-colors">
+                    const isLast = row === arr[arr.length - 1];
+                    return (<React.Fragment key={row.id}>
+                      <tr className="border-t border-[var(--border)] hover:bg-[var(--surface-hover)] transition-colors">
                         <td className="px-3 py-2 align-top">
                           {row.imageUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
@@ -1794,9 +1804,46 @@ export default function Home() {
                             inputMode="numeric"
                           />
                         </td>
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            type="text"
+                            value={row.campaign}
+                            onChange={e => updateRow(row.id, { campaign: e.target.value })}
+                            placeholder="CB"
+                            className="input input-sm w-24 tabular-nums"
+                            inputMode="numeric"
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top tabular-nums text-sm">
+                          {getUnsoldFee(row) > 0 ? (
+                            <span className="font-semibold text-[var(--danger)]">{getUnsoldFee(row).toLocaleString()}</span>
+                          ) : (
+                            <span className="text-[var(--fg-subtle)]">-</span>
+                          )}
+                        </td>
                       </tr>
-                    );
-                  })}
+                      {isLast && (
+                        <tr key="totals" className="border-t-2 border-[var(--fg)] bg-[var(--bg-subtle)]">
+                          <td colSpan={7} className="px-3 py-3 text-right font-bold text-xs uppercase tracking-wide text-[var(--fg-muted)]">
+                            合計
+                          </td>
+                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                            {totalSaleAmount ? totalSaleAmount.toLocaleString() : "-"}
+                          </td>
+                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                            {totalFee ? totalFee.toLocaleString() : "-"}
+                          </td>
+                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                            {totalCampaign ? totalCampaign.toLocaleString() : "-"}
+                          </td>
+                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                            {totalUnsoldFee ? <span className="text-[var(--danger)]">{totalUnsoldFee.toLocaleString()}</span> : "-"}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>);
+                    });
+                  })()}
                 </tbody>
               </table>
             </div>

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import type { AppSettings, ColumnDef, ColumnFieldType } from "@/app/api/settings/route";
+import type { AppSettings, ColumnFieldType } from "@/app/api/settings/route";
 import { mapHeaderToField } from "@/lib/headerMapping";
+import { getMarketProfile, type SalesTargetField } from "@/lib/marketProfiles";
 
 export const dynamic = "force-dynamic";
 
@@ -10,18 +11,15 @@ export const dynamic = "force-dynamic";
  * POST /api/sales/import
  *
  * multipart/form-data:
- *   file: xlsx/xls
+ *   file: xlsx/xls/csv
  *   market: 市場名 (省略時は現在設定中の市場を使用)
  *
  * 動作:
- *  1. 設定から marketFormats[market].salesImport の列定義を取得 (なければヒューリスティック)
- *  2. アップロードされたExcelのヘッダー行を検出
- *  3. 列定義に基づき LISTING_NUMBER / ITEM_NUMBER / SALE_AMOUNT / FEE の列index を特定
- *  4. 各データ行から値を抽出して返す
- *
- * レスポンス:
- *  { results: [{listingNumber, itemNumber, saleAmount, fee}], totalRows, matchedColumns, mode }
- *    mode: "format" | "heuristic"
+ *  1. 市場プロファイルから売上取込設定を取得 (なければヒューリスティック)
+ *  2. ファイルのヘッダー行を検出
+ *  3. プロファイルの headerMap に基づき列を特定
+ *  4. セリ結果フィルタがあれば適用
+ *  5. 各データ行から値を抽出して返す
  */
 
 interface ExtractedRow {
@@ -29,6 +27,7 @@ interface ExtractedRow {
   itemNumber: string;
   saleAmount: string;
   fee: string;
+  campaign: string;
 }
 
 const cellStr = (v: unknown): string => {
@@ -37,37 +36,28 @@ const cellStr = (v: unknown): string => {
   return String(v).trim();
 };
 
-type TargetField = "LISTING_NUMBER" | "ITEM_NUMBER" | "SALE_AMOUNT" | "FEE";
-const TARGET_FIELDS: TargetField[] = ["LISTING_NUMBER", "ITEM_NUMBER", "SALE_AMOUNT", "FEE"];
+const TARGET_FIELDS: SalesTargetField[] = ["LISTING_NUMBER", "ITEM_NUMBER", "SALE_AMOUNT", "FEE", "CAMPAIGN"];
 
-function isTargetField(f: ColumnFieldType): f is TargetField {
-  return TARGET_FIELDS.includes(f as TargetField);
+function isTargetField(f: ColumnFieldType | string): f is SalesTargetField {
+  return TARGET_FIELDS.includes(f as SalesTargetField);
 }
 
 /**
- * 保存された列定義を使って、Excelヘッダー行から列index を特定する
- * header が完全一致する列を優先、見つからなければ部分一致
+ * プロファイルの headerMap を使ってヘッダー行から列index を特定
  */
-function buildColIndexFromFormat(
+function buildColIndexFromProfile(
   headerRow: unknown[],
-  columns: ColumnDef[]
-): Partial<Record<TargetField, number>> {
-  const map: Partial<Record<TargetField, number>> = {};
-  const headerTexts = headerRow.map(c => cellStr(c));
-
-  for (const col of columns) {
-    if (!isTargetField(col.field)) continue;
-    if (map[col.field] !== undefined) continue;
-
-    // 完全一致を優先
-    let idx = headerTexts.findIndex(h => h === col.header);
-    // 部分一致
-    if (idx < 0 && col.header) {
-      idx = headerTexts.findIndex(h => h && (h.includes(col.header) || col.header.includes(h)));
+  headerMap: Record<string, SalesTargetField>
+): Partial<Record<SalesTargetField, number>> {
+  const map: Partial<Record<SalesTargetField, number>> = {};
+  headerRow.forEach((cell, idx) => {
+    const text = cellStr(cell);
+    if (!text) return;
+    const field = headerMap[text];
+    if (field && map[field] === undefined) {
+      map[field] = idx;
     }
-    if (idx >= 0) map[col.field] = idx;
-  }
-
+  });
   return map;
 }
 
@@ -76,8 +66,8 @@ function buildColIndexFromFormat(
  */
 function buildColIndexHeuristic(
   headerRow: unknown[]
-): Partial<Record<TargetField, number>> {
-  const map: Partial<Record<TargetField, number>> = {};
+): Partial<Record<SalesTargetField, number>> {
+  const map: Partial<Record<SalesTargetField, number>> = {};
   headerRow.forEach((cell, idx) => {
     const text = cellStr(cell);
     if (!text) return;
@@ -101,29 +91,28 @@ export async function POST(request: NextRequest) {
 
     // 設定取得
     const settingsRes = await supabase
-      .from("app_settings")
-      .select("data")
-      .eq("id", 1)
-      .single();
-
+      .from("app_settings").select("data").eq("id", 1).single();
     const settings: AppSettings = (settingsRes.data?.data as AppSettings) || {};
     const market = marketInput || settings.market || "";
-    const savedFormat =
-      market && settings.marketFormats
-        ? settings.marketFormats[market]?.salesImport
-        : undefined;
+
+    // 市場プロファイルを取得
+    const profile = market ? getMarketProfile(market) : undefined;
+    const salesConfig = profile?.salesImport;
+    const skipPatterns = salesConfig?.skipSheetPatterns || [];
+    const mode: "profile" | "heuristic" = salesConfig ? "profile" : "heuristic";
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const wb = XLSX.read(buffer, { type: "buffer" });
 
-    // 全シートを走査、ヘッダー行(5行以内)を検出したら先頭シートを採用
     let bestSheetName = wb.SheetNames[0];
     let bestData: unknown[][] | null = null;
     let bestHeaderIdx = -1;
-    let bestColMap: Partial<Record<TargetField, number>> = {};
-    let mode: "format" | "heuristic" = savedFormat && savedFormat.columns.length > 0 ? "format" : "heuristic";
+    let bestColMap: Partial<Record<SalesTargetField, number>> = {};
+    let resultFilterIdx = -1; // セリ結果列のindex
 
     for (const sn of wb.SheetNames) {
+      if (skipPatterns.some(p => sn.includes(p))) continue;
+
       const ws = wb.Sheets[sn];
       const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][];
       if (data.length < 2) continue;
@@ -133,11 +122,12 @@ export async function POST(request: NextRequest) {
         const nonEmpty = row.filter(c => cellStr(c).length > 0).length;
         if (nonEmpty < 2) continue;
 
-        let colMap: Partial<Record<TargetField, number>> = {};
-        if (savedFormat && savedFormat.columns.length > 0) {
-          colMap = buildColIndexFromFormat(row, savedFormat.columns);
+        // プロファイルの headerMap を使って列を特定
+        let colMap: Partial<Record<SalesTargetField, number>> = {};
+        if (salesConfig?.headerMap) {
+          colMap = buildColIndexFromProfile(row, salesConfig.headerMap);
         }
-        // 設定で見つからない or 不完全なら、ヒューリスティックで補完
+        // 不足分をヒューリスティックで補完
         const heuristicMap = buildColIndexHeuristic(row);
         for (const f of TARGET_FIELDS) {
           if (colMap[f] === undefined && heuristicMap[f] !== undefined) {
@@ -145,7 +135,6 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // LISTING_NUMBER か ITEM_NUMBER のいずれか、かつ SALE_AMOUNT か FEE のいずれかがあれば採用
         const hasKey = colMap.LISTING_NUMBER !== undefined || colMap.ITEM_NUMBER !== undefined;
         const hasValue = colMap.SALE_AMOUNT !== undefined || colMap.FEE !== undefined;
         if (hasKey && hasValue) {
@@ -153,6 +142,13 @@ export async function POST(request: NextRequest) {
           bestData = data;
           bestHeaderIdx = i;
           bestColMap = colMap;
+
+          // セリ結果フィルタ列を検出
+          if (salesConfig?.resultFilter) {
+            const filterHeader = salesConfig.resultFilter.header;
+            const filterIdx = row.findIndex(c => cellStr(c) === filterHeader);
+            if (filterIdx >= 0) resultFilterIdx = filterIdx;
+          }
           break;
         }
       }
@@ -171,11 +167,21 @@ export async function POST(request: NextRequest) {
 
     // データ行を抽出
     const results: ExtractedRow[] = [];
+    let filteredRows = 0;
     for (let i = bestHeaderIdx + 1; i < bestData.length; i++) {
       const row = bestData[i];
       if (!row || row.every(c => cellStr(c) === "")) continue;
 
-      const get = (f: TargetField) => {
+      // セリ結果フィルタ
+      if (resultFilterIdx >= 0 && salesConfig?.resultFilter) {
+        const resultVal = cellStr(row[resultFilterIdx]);
+        if (resultVal !== salesConfig.resultFilter.value) {
+          filteredRows++;
+          continue;
+        }
+      }
+
+      const get = (f: SalesTargetField) => {
         const idx = bestColMap[f];
         return idx !== undefined ? cellStr(row[idx]) : "";
       };
@@ -184,23 +190,24 @@ export async function POST(request: NextRequest) {
       const itemNumber = get("ITEM_NUMBER");
       const saleAmount = get("SALE_AMOUNT");
       const fee = get("FEE");
+      const campaign = get("CAMPAIGN");
 
-      // キーも値も空の行はスキップ
       if (!listingNumber && !itemNumber) continue;
       if (!saleAmount && !fee) continue;
 
-      results.push({ listingNumber, itemNumber, saleAmount, fee });
+      results.push({ listingNumber, itemNumber, saleAmount, fee, campaign });
     }
 
     return NextResponse.json({
       success: true,
       mode,
       market,
-      formatName: savedFormat?.name || null,
+      profileName: profile?.name || null,
       sheetName: bestSheetName,
       headerRow: bestHeaderIdx + 1,
       matchedColumns: bestColMap,
       totalRows: results.length,
+      filteredRows,
       results,
     });
   } catch (error) {

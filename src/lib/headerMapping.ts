@@ -71,6 +71,10 @@ const EXACT_MAP: Record<string, ColumnFieldType> = {
   "キャンペーン": "EMPTY",
   "キャンペーンキャッシュバック": "EMPTY",
   "返品": "EMPTY",
+  "出品者備考": "EMPTY",
+  "税込み": "SALE_AMOUNT_TAX_INCL",
+  "手数料税込み": "FEE_TAX_INCL",
+  "バイヤー２": "EMPTY",
 };
 
 // より specific → general の順で並べる
