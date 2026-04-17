@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 const HEADER_ALIASES: Record<string, string[]> = {
   item_number:    ["商品番号", "SKU", "管理番号", "item_number", "商品No"],
-  listing_number: ["出品番号", "出品No", "出品ID", "listing_number"],
+  listing_number: ["出品番号", "出品No", "出品ID", "listing_number", "自社出品"],
   brand:          ["ブランド", "brand", "メーカー"],
   item_name:      ["バッグ名", "ブランド名", "商品名", "品名", "item_name"],
   accessories:    ["付属品", "accessories"],
