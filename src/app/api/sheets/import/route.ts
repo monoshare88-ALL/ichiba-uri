@@ -25,7 +25,7 @@ const HEADER_ALIASES: Record<string, string[]> = {
   purchase_price: ["仕入価格", "買値", "仕入れ", "purchase_price"],
   sale_price:     ["販売価格", "売値", "sale_price"],
   sale_amount:    ["売り金額", "売上", "成立金額", "落札価格", "sale_amount"],
-  fee:            ["手数料", "システム手数料", "落札手数料", "fee"],
+  fee:            ["手数料", "システム手数料", "落札手数料", "販売手数料", "fee"],
   lot_no:         ["ロットNo", "ロットNo.", "lot_no", "ロット"],
   box_no:         ["箱番", "箱番、枝番", "箱番号", "box_no"],
 };
@@ -72,7 +72,13 @@ export async function POST(request: NextRequest) {
     let totalRawRows = 0;
     let skippedRows = 0;
 
+    // コメ兵Excel: "原本" タブはテンプレートなので除外し、データ行が最も多いシートを採用
+    let bestRowCount = 0;
+
     for (const sn of wb.SheetNames) {
+      // "原本" を含むシート名はスキップ (コメ兵テンプレート)
+      if (sn.includes("原本")) continue;
+
       const ws = wb.Sheets[sn];
       const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][];
       if (data.length < 2) continue;
@@ -89,11 +95,36 @@ export async function POST(request: NextRequest) {
       }
       if (headerRowIdx < 0) continue;
 
-      const colMap = buildColumnIndexMap(data[headerRowIdx]);
-      bestSheetName = sn;
-      bestData = data.slice(headerRowIdx);
-      bestColMap = colMap;
-      break;
+      const sliced = data.slice(headerRowIdx);
+      if (sliced.length > bestRowCount) {
+        const colMap = buildColumnIndexMap(data[headerRowIdx]);
+        bestSheetName = sn;
+        bestData = sliced;
+        bestColMap = colMap;
+        bestRowCount = sliced.length;
+      }
+    }
+
+    // 「原本」しかないファイルの場合はフォールバック
+    if (!bestData) {
+      for (const sn of wb.SheetNames) {
+        const ws = wb.Sheets[sn];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][];
+        if (data.length < 2) continue;
+        let headerRowIdx = -1;
+        for (let i = 0; i < Math.min(8, data.length); i++) {
+          const map = buildColumnIndexMap(data[i]);
+          if (map.item_number !== undefined || map.listing_number !== undefined) {
+            headerRowIdx = i;
+            break;
+          }
+        }
+        if (headerRowIdx < 0) continue;
+        bestSheetName = sn;
+        bestData = data.slice(headerRowIdx);
+        bestColMap = buildColumnIndexMap(data[headerRowIdx]);
+        break;
+      }
     }
 
     if (!bestData || !bestColMap) {
