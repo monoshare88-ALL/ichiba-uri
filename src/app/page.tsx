@@ -1691,12 +1691,14 @@ export default function Home() {
                     <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">手数料</th>
                     <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">キャンペーン</th>
                     <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">不落札手数料</th>
+                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">粗利</th>
+                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">粗利(CB込)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.filter(r => r.itemNumber).length === 0 && (
                     <tr>
-                      <td colSpan={11} className="px-6 py-16 text-center text-[var(--fg-muted)] text-sm">
+                      <td colSpan={13} className="px-6 py-16 text-center text-[var(--fg-muted)] text-sm">
                         出品タブで商品を登録すると、ここに売上入力欄が表示されます。
                       </td>
                     </tr>
@@ -1708,6 +1710,23 @@ export default function Home() {
                     const totalCampaign = salesRows.reduce((sum, r) => sum + (parseFloat(r.campaign) || 0), 0);
                     const getUnsoldFee = (r: RowData) => (r.saleAmount === "0" || r.saleAmount === "") ? 500 : 0;
                     const totalUnsoldFee = salesRows.reduce((sum, r) => sum + getUnsoldFee(r), 0);
+                    const taxRate = settings.taxRate || 10;
+                    const taxMul = 1 + taxRate / 100;
+                    // 粗利 = (成立金額 − 手数料) × 税率
+                    const getGrossProfit = (r: RowData) => {
+                      const sa = parseFloat(r.saleAmount);
+                      const fe = parseFloat(r.fee);
+                      if (!Number.isFinite(sa) || sa === 0) return 0;
+                      return (sa - (Number.isFinite(fe) ? fe : 0)) * taxMul;
+                    };
+                    // 粗利CB込み = 粗利 + キャンペーンCB × 税率
+                    const getGrossProfitWithCB = (r: RowData) => {
+                      const gp = getGrossProfit(r);
+                      const cb = parseFloat(r.campaign);
+                      return gp + (Number.isFinite(cb) ? cb * taxMul : 0);
+                    };
+                    const totalGrossProfit = salesRows.reduce((sum, r) => sum + getGrossProfit(r), 0);
+                    const totalGrossProfitCB = salesRows.reduce((sum, r) => sum + getGrossProfitWithCB(r), 0);
                     return salesRows.map((row, _idx, arr) => {
                     const titleText =
                       row.geminiTitle?.trim() ||
@@ -1821,6 +1840,16 @@ export default function Home() {
                             <span className="text-[var(--fg-subtle)]">-</span>
                           )}
                         </td>
+                        <td className="px-3 py-2 align-top tabular-nums text-sm font-semibold">
+                          {getGrossProfit(row) ? Math.round(getGrossProfit(row)).toLocaleString() : <span className="text-[var(--fg-subtle)]">-</span>}
+                        </td>
+                        <td className="px-3 py-2 align-top tabular-nums text-sm font-semibold">
+                          {getGrossProfitWithCB(row) !== getGrossProfit(row) ? (
+                            <span className="text-[var(--success)]">{Math.round(getGrossProfitWithCB(row)).toLocaleString()}</span>
+                          ) : (
+                            <span className="text-[var(--fg-subtle)]">-</span>
+                          )}
+                        </td>
                       </tr>
                       {isLast && (
                         <tr key="totals" className="border-t-2 border-[var(--fg)] bg-[var(--bg-subtle)]">
@@ -1838,6 +1867,14 @@ export default function Home() {
                           </td>
                           <td className="px-3 py-3 font-bold tabular-nums text-sm">
                             {totalUnsoldFee ? <span className="text-[var(--danger)]">{totalUnsoldFee.toLocaleString()}</span> : "-"}
+                          </td>
+                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                            {totalGrossProfit ? Math.round(totalGrossProfit).toLocaleString() : "-"}
+                          </td>
+                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                            {totalGrossProfitCB !== totalGrossProfit ? (
+                              <span className="text-[var(--success)]">{Math.round(totalGrossProfitCB).toLocaleString()}</span>
+                            ) : "-"}
                           </td>
                         </tr>
                       )}
