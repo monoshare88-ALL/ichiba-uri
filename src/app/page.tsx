@@ -1030,6 +1030,10 @@ export default function Home() {
                 検索
               </button>
             </div>
+            <a href="/analysis" className="btn btn-ghost btn-sm" title="過去結果分析">
+              <span className="text-base leading-none">📊</span>
+              <span className="hidden sm:inline text-xs">分析</span>
+            </a>
             <a href="/settings" className="btn btn-ghost btn-sm" title="設定">
               <span className="text-base leading-none">⚙</span>
               <span className="hidden sm:inline text-xs">設定</span>
