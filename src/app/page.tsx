@@ -572,11 +572,16 @@ export default function Home() {
     }
   };
 
-  // 売上取込 (売り金額・手数料をExcelから読込んで既存行に反映)
+  // 売上取込 (売り金額・手数料をExcel/CSV/PDFから読込んで既存行に反映)
   const handleSalesImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!confirm(`「${file.name}」から売り金額・手数料を読込んで既存行に反映しますか？\n一致判定: 出品番号 または 商品番号`)) {
+    const isPdf = file.name.toLowerCase().endsWith(".pdf");
+    if (!confirm(
+      isPdf
+        ? `「${file.name}」(PDF委託販売精算書)から売り金額を読込みますか？\n一致判定: 箱番-枝番`
+        : `「${file.name}」から売り金額・手数料を読込んで既存行に反映しますか？\n一致判定: 出品番号 または 商品番号`
+    )) {
       e.target.value = "";
       return;
     }
@@ -592,17 +597,36 @@ export default function Home() {
         return;
       }
 
-      // rows state にマージ
-      type Result = { listingNumber: string; itemNumber: string; saleAmount: string; fee: string; campaign: string };
+      // PDF結果: boxBranch (箱番-枝番) でマッチ
+      type Result = { listingNumber: string; itemNumber: string; saleAmount: string; fee: string; campaign: string; boxBranch?: string; itemLabel?: string };
       const results: Result[] = data.results || [];
+      const pdfInfo = data.pdfInfo as { officialTotal?: number; parsedTotal?: number; hasMismatch?: boolean; mismatchAmount?: number } | undefined;
       let matched = 0;
       let updated = 0;
       const unmatched: Result[] = [];
 
       setRows(prev =>
         prev.map(r => {
-          if (!r.itemNumber && !r.listingNumber) return r;
+          // マッチング: PDF(箱番-枝番) or Excel(出品番号/商品番号)
           const m = results.find(x => {
+            // PDF: 箱番-枝番マッチ (boxBranch = "186-3" vs row の boxNo + lotNo から構築)
+            if (x.boxBranch && r.boxNo) {
+              // あご表の行から箱番-枝番キーを構築
+              // boxNo が数値の場合そのまま、lotNo と組み合わせ
+              // TABA: boxNo = 箱番(頁番号), lotNo には枝番的情報がない
+              // → boxBranch の箱番部分と r.boxNo を比較
+              const [pdfBox, pdfBranch] = x.boxBranch.split("-");
+              if (r.boxNo === pdfBox) {
+                // 枝番の特定: あご表のE列(枝番)は listingNumber から逆算可能
+                // TABA通番: listingNumber が数値の場合、枝番 = ((通番-1) % 10) + 1
+                const serial = parseInt(r.listingNumber, 10);
+                if (!isNaN(serial)) {
+                  const branch = ((serial - 1) % 10) + 1;
+                  if (String(branch) === pdfBranch) return true;
+                }
+              }
+            }
+            // Excel: 出品番号 or 商品番号マッチ
             if (x.listingNumber && r.listingNumber && x.listingNumber === r.listingNumber) return true;
             if (x.itemNumber && r.itemNumber && x.itemNumber === r.itemNumber) return true;
             return false;
@@ -618,23 +642,51 @@ export default function Home() {
         })
       );
 
-      // 未マッチの行をカウント (results側から見て)
+      // 未マッチの行をカウント
       for (const x of results) {
-        const existsInRows = rows.some(
-          r =>
-            (x.listingNumber && r.listingNumber === x.listingNumber) ||
-            (x.itemNumber && r.itemNumber === x.itemNumber)
-        );
+        const existsInRows = rows.some(r => {
+          if (x.boxBranch && r.boxNo) {
+            const [pdfBox, pdfBranch] = x.boxBranch.split("-");
+            if (r.boxNo === pdfBox) {
+              const serial = parseInt(r.listingNumber, 10);
+              if (!isNaN(serial) && String(((serial - 1) % 10) + 1) === pdfBranch) return true;
+            }
+          }
+          if (x.listingNumber && r.listingNumber === x.listingNumber) return true;
+          if (x.itemNumber && r.itemNumber === x.itemNumber) return true;
+          return false;
+        });
         if (!existsInRows) unmatched.push(x);
       }
 
-      alert(
-        `売上取込完了\n` +
-          `ファイルから抽出: ${results.length} 行\n` +
-          `マッチ: ${matched} 行 / 更新: ${updated} 行\n` +
-          `未マッチ: ${unmatched.length} 行\n` +
-          `形式: ${data.mode === "profile" ? `プロファイル (${data.profileName || settings.market || "-"})` : "自動検出"}`
-      );
+      // 結果メッセージ構築
+      let msg = `売上取込完了\n`;
+      if (data.mode === "pdf") {
+        msg += `PDF: ${data.pdfInfo?.salesPages || 0}ページから ${results.length} 件抽出\n`;
+      } else {
+        msg += `ファイルから抽出: ${results.length} 行\n`;
+      }
+      msg += `マッチ: ${matched} 行 / 更新: ${updated} 行\n`;
+      msg += `未マッチ: ${unmatched.length} 行\n`;
+
+      // PDF金額不一致警告
+      if (pdfInfo?.hasMismatch) {
+        msg += `\n⚠ 金額不一致:\n`;
+        msg += `  公式売上金額(税抜): ¥${(pdfInfo.officialTotal || 0).toLocaleString()}\n`;
+        msg += `  PDF抽出合計: ¥${(pdfInfo.parsedTotal || 0).toLocaleString()}\n`;
+        msg += `  差額: ¥${(pdfInfo.mismatchAmount || 0).toLocaleString()}\n`;
+        msg += `  → 不売品が含まれている可能性があります\n`;
+        if (unmatched.length > 0) {
+          msg += `\n不売候補(あご表に未マッチ):\n`;
+          for (const u of unmatched.slice(0, 10)) {
+            msg += `  ${u.boxBranch || u.listingNumber} ¥${Number(u.saleAmount).toLocaleString()} ${(u.itemLabel || "").slice(0, 25)}\n`;
+          }
+          if (unmatched.length > 10) msg += `  ...他 ${unmatched.length - 10} 件\n`;
+        }
+      }
+
+      msg += `\n形式: ${data.mode === "pdf" ? "PDF委託販売精算書" : data.mode === "profile" ? `プロファイル (${data.profileName || settings.market || "-"})` : "自動検出"}`;
+      alert(msg);
     } catch (err) {
       alert(`取込エラー: ${err}`);
     } finally {

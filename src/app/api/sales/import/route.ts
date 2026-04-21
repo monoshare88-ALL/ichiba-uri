@@ -82,40 +82,58 @@ function buildColIndexHeuristic(
 /**
  * PDF委託販売精算書パーサー（市場連盟 TABA 用）
  *
- * unpdf (pdfjs-dist wrapper) でテキスト抽出し、正規表現でパース
- * 各売上ページ: 頁番号(3桁) + 枝番1-10の商品行 (金額+枝番+品名+枝番+数量)
- * 通番 = (頁 - 先頭頁) × 10 + 枝番
+ * Page 1: 御請求額計算書 → 公式売上金額を抽出
+ * Page N+: 委託販売精算書(売上明細書) → 箱番(頁番号)-枝番で商品+金額を抽出
+ *
+ * listingNumber は "箱番-枝番" 形式で返す（例: "186-3"）
+ * フロント側であご表の boxNo(D列) + 枝番(E列) と突合してマッチング
  */
-async function parseTabaPdf(buffer: Buffer): Promise<{
-  results: ExtractedRow[];
+
+interface PdfItemRow extends ExtractedRow {
+  boxBranch: string;  // "箱番-枝番" (例: "186-3")
+  itemLabel: string;  // 品名 (半角カナ)
+}
+
+interface PdfParseResult {
+  results: PdfItemRow[];
   totalPages: number;
   salesPages: number;
-}> {
+  officialTotal: number;   // Page 1 の売上金額（税抜き）
+  parsedTotal: number;     // 抽出アイテム合計
+  hasMismatch: boolean;    // 合計不一致
+  mismatchAmount: number;  // 差額
+}
+
+async function parseTabaPdf(buffer: Buffer): Promise<PdfParseResult> {
   const { extractText } = await import("unpdf");
   const data = new Uint8Array(buffer);
   const extracted = await extractText(data, { mergePages: false });
 
-  const results: ExtractedRow[] = [];
+  const results: PdfItemRow[] = [];
   let salesPages = 0;
+  let officialTotal = 0;
 
   const pages: string[] = extracted.text || [];
   for (const pageText of pages) {
+    // Page 1: 御請求額計算書から公式売上金額を抽出
+    if (pageText.includes("御請求額") && pageText.includes("売上金額")) {
+      const m = pageText.match(/売上金額\s+([\d,]+)/);
+      if (m) officialTotal = parseInt(m[1].replace(/,/g, ""), 10);
+      continue;
+    }
+
     if (!pageText.includes("委託販売精算書")) continue;
     salesPages++;
 
-    // 頁番号を取得 (独立行の3桁数字)
-    let pageNum = 0;
+    // 頁番号(=箱番)を取得
+    let boxNo = 0;
     const pageNumMatch = pageText.match(/\n(\d{3})\n/);
-    if (pageNumMatch) pageNum = parseInt(pageNumMatch[1], 10);
+    if (pageNumMatch) boxNo = parseInt(pageNumMatch[1], 10);
 
-    // データ行パターン: "金額+枝番 品名+枝番 数量"
-    // 例: "388,0001 ﾊﾞｯｸﾞ ｼｬﾈﾙ ｺｺﾊﾝﾄﾞﾙﾐﾆ1 1"
-    // 正規表現: ([\d,]+)(\d{1,2}) (.+?)(\d{1,2}) 1$
     const lines = pageText.split("\n");
     for (const line of lines) {
-      // パターン: 金額(カンマ付き数字) + 枝番 + スペース + 品名 + 枝番 + スペース + 数量(1)
+      // パターン: 金額(カンマ付き) + 枝番 + スペース + 品名 + 枝番 + スペース + 数量(1)
       // 例: "388,0001 ﾊﾞｯｸﾞ ｼｬﾈﾙ ｺｺﾊﾝﾄﾞﾙﾐﾆ1 1"
-      // 金額: \d{1,3}(,\d{3})* + 末尾0で終わる
       const m = line.match(/^(\d{1,3}(?:,\d{3})*)(\d{1,2})\s+(.+?)(\d{1,2})\s+1$/);
       if (!m) continue;
 
@@ -124,44 +142,38 @@ async function parseTabaPdf(buffer: Buffer): Promise<{
       const branch2 = parseInt(m[4], 10);
       const amount = parseInt(amountStr, 10);
 
-      // 枝番の整合性チェック
       if (branch1 !== branch2) continue;
-      if (branch1 < 1 || branch1 > 20) continue;
+      if (branch1 < 1 || branch1 > 10) continue;
       if (isNaN(amount) || amount < 100) continue;
 
-      // 品名に合計系キーワードがあればスキップ
       const name = m[3].trim();
       if (name.includes("頁") || name.includes("合計")) continue;
 
       results.push({
-        listingNumber: `${pageNum}-${branch1}`,
+        listingNumber: `${boxNo}-${branch1}`,
         itemNumber: "",
         saleAmount: String(amount),
         fee: "",
         campaign: "",
+        boxBranch: `${boxNo}-${branch1}`,
+        itemLabel: name,
       });
     }
   }
 
-  // 通番を計算: (頁 - 先頭頁) * 10 + 枝番
-  if (results.length > 0) {
-    const pageNums = results.map((r) => {
-      const [pg] = r.listingNumber.split("-");
-      return parseInt(pg, 10);
-    }).filter((n) => !isNaN(n));
-    const firstPage = Math.min(...pageNums);
+  const parsedTotal = results.reduce((s, r) => s + parseInt(r.saleAmount, 10), 0);
+  const hasMismatch = officialTotal > 0 && parsedTotal !== officialTotal;
+  const mismatchAmount = parsedTotal - officialTotal;
 
-    for (const r of results) {
-      const [pgStr, brStr] = r.listingNumber.split("-");
-      const pg = parseInt(pgStr, 10);
-      const br = parseInt(brStr, 10);
-      if (!isNaN(pg) && !isNaN(br)) {
-        r.listingNumber = String((pg - firstPage) * 10 + br);
-      }
-    }
-  }
-
-  return { results, totalPages: extracted.totalPages || 0, salesPages };
+  return {
+    results,
+    totalPages: extracted.totalPages || 0,
+    salesPages,
+    officialTotal,
+    parsedTotal,
+    hasMismatch,
+    mismatchAmount,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -191,7 +203,7 @@ export async function POST(request: NextRequest) {
 
     // PDF の場合: 市場連盟 委託販売精算書をパース
     if (fileName.toLowerCase().endsWith(".pdf")) {
-      const { results, totalPages, salesPages } = await parseTabaPdf(buffer);
+      const parsed = await parseTabaPdf(buffer);
       return NextResponse.json({
         success: true,
         mode: "pdf",
@@ -200,10 +212,17 @@ export async function POST(request: NextRequest) {
         sheetName: "委託販売精算書",
         headerRow: 0,
         matchedColumns: {},
-        totalRows: results.length,
+        totalRows: parsed.results.length,
         filteredRows: 0,
-        results,
-        pdfInfo: { totalPages, salesPages },
+        results: parsed.results,
+        pdfInfo: {
+          totalPages: parsed.totalPages,
+          salesPages: parsed.salesPages,
+          officialTotal: parsed.officialTotal,
+          parsedTotal: parsed.parsedTotal,
+          hasMismatch: parsed.hasMismatch,
+          mismatchAmount: parsed.mismatchAmount,
+        },
       });
     }
 
