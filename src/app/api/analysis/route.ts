@@ -595,6 +595,53 @@ function buildSummary(allRows: ProfitRow[]) {
       returnFee: d.returnFee,
     }));
 
+  // 半期別引き手数料集計 (12-5月 / 6-11月)
+  // date format: YYMMDD → 月を取得
+  const getHalfPeriod = (dateStr: string): string => {
+    const yy = parseInt(dateStr.slice(0, 2), 10);
+    const mm = parseInt(dateStr.slice(2, 4), 10);
+    const fullYear = 2000 + yy;
+    // 12-5月期: 前年12月〜当年5月 → ラベルは "YY年12月-YY年5月"
+    // 6-11月期: 当年6月〜当年11月
+    if (mm >= 6 && mm <= 11) {
+      return `${fullYear}年6-11月`;
+    }
+    // 12月は次の期の開始
+    if (mm === 12) {
+      return `${fullYear}年12月-${fullYear + 1}年5月`;
+    }
+    // 1-5月は前年12月開始の期
+    return `${fullYear - 1}年12月-${fullYear}年5月`;
+  };
+
+  interface ReturnByPeriodBuyer { buyer: string; count: number; fee: number }
+  interface ReturnPeriod { period: string; buyers: ReturnByPeriodBuyer[]; totalCount: number; totalFee: number }
+
+  const returnByPeriod: Record<string, Record<string, { count: number; fee: number }>> = {};
+  for (const r of returned) {
+    if (r.returnFee <= 0) continue;
+    const period = getHalfPeriod(r.date);
+    const buyer = r.buyer || "(不明)";
+    if (!returnByPeriod[period]) returnByPeriod[period] = {};
+    if (!returnByPeriod[period][buyer]) returnByPeriod[period][buyer] = { count: 0, fee: 0 };
+    returnByPeriod[period][buyer].count++;
+    returnByPeriod[period][buyer].fee += r.returnFee;
+  }
+
+  const returnPeriodSummary: ReturnPeriod[] = Object.entries(returnByPeriod)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([period, buyers]) => {
+      const buyerList = Object.entries(buyers)
+        .sort((a, b) => b[1].fee - a[1].fee)
+        .map(([buyer, d]) => ({ buyer, count: d.count, fee: d.fee }));
+      return {
+        period,
+        buyers: buyerList,
+        totalCount: buyerList.reduce((s, b) => s + b.count, 0),
+        totalFee: buyerList.reduce((s, b) => s + b.fee, 0),
+      };
+    });
+
   // totals
   const totalPurchase = profitRows.reduce((s, r) => s + r.purchaseTax, 0);
   const totalProfit = profitRows.reduce((s, r) => s + r.profit, 0);
@@ -617,6 +664,7 @@ function buildSummary(allRows: ProfitRow[]) {
     dateSummary,
     brandSummary,
     buyerSummary,
+    returnPeriodSummary,
     items: allDisplayRows.map((r) => ({
       ...r,
       purchaseTax: Math.round(r.purchaseTax),

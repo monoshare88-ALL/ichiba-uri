@@ -64,6 +64,12 @@ interface AnalysisData {
   dateSummary: DateSummary[];
   brandSummary: GroupSummary[];
   buyerSummary: GroupSummary[];
+  returnPeriodSummary: {
+    period: string;
+    buyers: { buyer: string; count: number; fee: number }[];
+    totalCount: number;
+    totalFee: number;
+  }[];
   items: ProfitRow[];
 }
 
@@ -254,7 +260,7 @@ export default function AnalysisPage() {
   }
 
   if (!data) return null;
-  const { summary, dateSummary, brandSummary, buyerSummary } = data;
+  const { summary, dateSummary, brandSummary, buyerSummary, returnPeriodSummary } = data;
 
   return (
     <div className="min-h-screen">
@@ -289,24 +295,26 @@ export default function AnalysisPage() {
           />
         </div>
 
-        {/* 引き手数料 バイヤー別内訳 (コメ兵のみ) */}
-        {summary.totalReturnFee > 0 && (
-          <div className="panel p-3">
-            <div className="flex flex-wrap items-start gap-4">
-              <div className="text-[12px] font-bold">
-                引き手数料 合計 {yen(summary.totalReturnFee)}（{summary.totalReturned}件 × ¥500）
-              </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
-                {buyerSummary
-                  .filter((b) => (b.returnCount || 0) > 0)
-                  .sort((a, b) => (b.returnFee || 0) - (a.returnFee || 0))
-                  .map((b) => (
-                    <span key={b.name} className="text-[var(--fg-muted)]">
-                      {b.name}: {b.returnCount}件 {yen(b.returnFee || 0)}
+        {/* 引き手数料 半期別・バイヤー別内訳 (コメ兵のみ) */}
+        {returnPeriodSummary.length > 0 && (
+          <div className="panel p-3 space-y-2">
+            <div className="text-[12px] font-bold">
+              引き手数料 合計 {yen(summary.totalReturnFee)}（{summary.totalReturned}件 × ¥500）
+            </div>
+            {returnPeriodSummary.map((p) => (
+              <div key={p.period} className="flex flex-wrap items-start gap-3 text-[12px] border-t border-[var(--bg-muted)] pt-1.5">
+                <span className="font-bold min-w-[160px]">
+                  {p.period}　{p.totalCount}件 {yen(p.totalFee)}
+                </span>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                  {p.buyers.map((b) => (
+                    <span key={b.buyer} className="text-[var(--fg-muted)]">
+                      {b.buyer}: {b.count}件 {yen(b.fee)}
                     </span>
                   ))}
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         )}
 
