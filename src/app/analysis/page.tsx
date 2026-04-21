@@ -297,25 +297,7 @@ export default function AnalysisPage() {
 
         {/* 引き手数料 半期別・バイヤー別内訳 (コメ兵のみ) */}
         {returnPeriodSummary.length > 0 && (
-          <div className="panel p-3 space-y-2">
-            <div className="text-[12px] font-bold">
-              引き手数料 合計 {yen(summary.totalReturnFee)}（{summary.totalReturned}件 × ¥500）
-            </div>
-            {returnPeriodSummary.map((p) => (
-              <div key={p.period} className="flex flex-wrap items-start gap-3 text-[12px] border-t border-[var(--bg-muted)] pt-1.5">
-                <span className="font-bold min-w-[160px]">
-                  {p.period}　{p.totalCount}件 {yen(p.totalFee)}
-                </span>
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                  {p.buyers.map((b) => (
-                    <span key={b.buyer} className="text-[var(--fg-muted)]">
-                      {b.buyer}: {b.count}件 {yen(b.fee)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+          <ReturnFeePeriodPanel periods={returnPeriodSummary} summary={summary} />
         )}
 
         {/* Tabs */}
@@ -643,6 +625,48 @@ function SummaryCard({ label, value, sub, color }: { label: string; value: strin
         {value}
       </p>
       <p className="text-[11px] text-[var(--fg-muted)] mt-1">{sub}</p>
+    </div>
+  );
+}
+
+function ReturnFeePeriodPanel({
+  periods,
+  summary,
+}: {
+  periods: AnalysisData["returnPeriodSummary"];
+  summary: AnalysisData["summary"];
+}) {
+  const [selected, setSelected] = useState("");
+  const current = selected ? periods.find((p) => p.period === selected) : null;
+
+  return (
+    <div className="panel p-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-[12px] font-bold">
+          引き手数料 合計 {yen(summary.totalReturnFee)}���{summary.totalReturned}件 × ¥500）
+        </span>
+        <select
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          className="input input-sm max-w-[220px]"
+        >
+          <option value="">— 半期を選択 —</option>
+          {periods.map((p) => (
+            <option key={p.period} value={p.period}>
+              {p.period}（{p.totalCount}件 {yen(p.totalFee)}）
+            </option>
+          ))}
+        </select>
+      </div>
+      {current && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[12px]">
+          {current.buyers.map((b) => (
+            <span key={b.buyer} className="text-[var(--fg-muted)]">
+              {b.buyer}: {b.count}件 {yen(b.fee)}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
