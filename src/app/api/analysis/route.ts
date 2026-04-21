@@ -140,6 +140,7 @@ function extractRows(
     else if (h === "状態" && col.condition == null) col.condition = c;
     else if (h.includes("指値") && col.reserve == null) col.reserve = c;
     else if (h === "バイヤー" && col.buyer == null) col.buyer = c;
+    else if (h === "バイヤー２" && col.buyer2 == null) col.buyer2 = c;
     else if (h === "商品番号" && col.item_no == null) col.item_no = c;
     else if ((h === "自社出品" || h === "自社") && col.listing_id == null) col.listing_id = c;
     else if (h === "買値" && col.purchase == null) col.purchase = c;
@@ -229,7 +230,14 @@ function extractRows(
         brand: String(brand || ""),
         itemName: String(itemName || ""),
         condition: String(getCellVal(sheet, r, col.condition ?? -1) || ""),
-        buyer: String(getCellVal(sheet, r, col.buyer ?? -1) || ""),
+        buyer: (() => {
+          const b = String(getCellVal(sheet, r, col.buyer ?? -1) || "");
+          if (b === "再販" && col.buyer2 != null) {
+            const b2 = String(getCellVal(sheet, r, col.buyer2) || "");
+            return b2 ? `再販・${b2}` : "再販";
+          }
+          return b;
+        })(),
         itemNo: String(getCellVal(sheet, r, col.item_no ?? -1) || ""),
         listingId: String(getCellVal(sheet, r, col.listing_id ?? -1) || ""),
         reserve: safeNum(getCellVal(sheet, r, col.reserve ?? -1)),

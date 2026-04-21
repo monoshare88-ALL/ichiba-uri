@@ -289,6 +289,27 @@ export default function AnalysisPage() {
           />
         </div>
 
+        {/* 引き手数料 バイヤー別内訳 (コメ兵のみ) */}
+        {summary.totalReturnFee > 0 && (
+          <div className="panel p-3">
+            <div className="flex flex-wrap items-start gap-4">
+              <div className="text-[12px] font-bold">
+                引き手数料 合計 {yen(summary.totalReturnFee)}（{summary.totalReturned}件 × ¥500）
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+                {buyerSummary
+                  .filter((b) => (b.returnCount || 0) > 0)
+                  .sort((a, b) => (b.returnFee || 0) - (a.returnFee || 0))
+                  .map((b) => (
+                    <span key={b.name} className="text-[var(--fg-muted)]">
+                      {b.name}: {b.returnCount}件 {yen(b.returnFee || 0)}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Tabs */}
         <div className="flex items-center gap-2">
           {marketTabs}
