@@ -162,7 +162,7 @@ export default function AnalysisPage() {
     let items = data.items;
     if (filterDate) items = items.filter((r) => r.date === filterDate);
     if (filterBrand) items = items.filter((r) => r.brand === filterBrand);
-    if (filterBuyer) items = items.filter((r) => r.buyer === filterBuyer);
+    if (filterBuyer) items = items.filter((r) => baseBuyerName(r.buyer) === filterBuyer);
     if (filterText) {
       const q = filterText.toLowerCase();
       items = items.filter((r) => r.itemName.toLowerCase().includes(q) || r.brand.toLowerCase().includes(q) || r.itemNo.includes(q) || r.listingId.includes(q));
@@ -210,7 +210,16 @@ export default function AnalysisPage() {
 
   const uniqueDates = useMemo(() => data ? [...new Set(data.items.map((r) => r.date))].sort() : [], [data]);
   const uniqueBrands = useMemo(() => data ? [...new Set(data.items.map((r) => r.brand))].filter(Boolean).sort() : [], [data]);
-  const uniqueBuyers = useMemo(() => data ? [...new Set(data.items.map((r) => r.buyer))].filter(Boolean).sort() : [], [data]);
+  // バイヤーのベース名を抽出: "再販・月崎" → "月崎", "月崎" → "月崎"
+  const baseBuyerName = (b: string) => b.startsWith("再販・") ? b.slice(3) : b;
+  const uniqueBuyers = useMemo(() => {
+    if (!data) return [];
+    const bases = new Set<string>();
+    for (const r of data.items) {
+      if (r.buyer) bases.add(baseBuyerName(r.buyer));
+    }
+    return [...bases].sort();
+  }, [data]);
 
   const marketName = MARKETS.find((m) => m.id === market)?.name || market;
 
@@ -430,7 +439,7 @@ export default function AnalysisPage() {
                     <tr
                       key={b.name}
                       className="cursor-pointer"
-                      onClick={() => { setFilterBuyer(b.name); setActiveTab("items"); }}
+                      onClick={() => { setFilterBuyer(baseBuyerName(b.name)); setActiveTab("items"); }}
                     >
                       <td>{b.name}</td>
                       <td className="text-right">
