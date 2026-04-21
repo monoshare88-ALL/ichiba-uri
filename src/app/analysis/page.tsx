@@ -24,6 +24,7 @@ interface ProfitRow {
   saleTaxIncl: number;
   profit: number;
   isReturned: boolean;
+  returnFee: number;
 }
 
 interface DateSummary {
@@ -44,6 +45,8 @@ interface GroupSummary {
   purchase: number;
   profit: number;
   profitRate: number;
+  returnCount?: number;
+  returnFee?: number;
 }
 
 interface AnalysisData {
@@ -55,6 +58,7 @@ interface AnalysisData {
     totalProfit: number;
     totalFee: number;
     totalCampaign: number;
+    totalReturnFee: number;
     profitRate: number;
   };
   dateSummary: DateSummary[];
@@ -80,6 +84,26 @@ const dateLabel = (d: string) => {
 
 type SortKey = "date" | "brand" | "itemName" | "itemNo" | "listingId" | "buyer" | "purchaseTax" | "saleTax" | "feeTax" | "campaignTax" | "profit";
 type SortDir = "asc" | "desc";
+
+/** 自然順ソート: A-1, A-2, ..., A-10, B-1, ... */
+const naturalCompare = (a: string, b: string): number => {
+  const re = /(\d+)|(\D+)/g;
+  const pa = a.match(re) || [];
+  const pb = b.match(re) || [];
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const sa = pa[i] || "";
+    const sb = pb[i] || "";
+    const na = parseInt(sa, 10);
+    const nb = parseInt(sb, 10);
+    if (!isNaN(na) && !isNaN(nb)) {
+      if (na !== nb) return na - nb;
+    } else {
+      const cmp = sa.localeCompare(sb);
+      if (cmp !== 0) return cmp;
+    }
+  }
+  return 0;
+};
 
 const MARKETS = [
   { id: "komehyo", name: "コメ兵" },
@@ -143,6 +167,10 @@ export default function AnalysisPage() {
       const av = a[sortKey];
       const bv = b[sortKey];
       if (typeof av === "string" && typeof bv === "string") {
+        // listingId は自然順ソート (A-1, A-2, ..., A-10)
+        if (sortKey === "listingId") {
+          return sortDir === "asc" ? naturalCompare(av, bv) : naturalCompare(bv, av);
+        }
         return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
       }
       return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
@@ -238,7 +266,7 @@ export default function AnalysisPage() {
           <SummaryCard
             label="販売件数"
             value={`${summary.totalItems}件`}
-            sub={`赤字 ${summary.totalLoss}件 / 返品 ${summary.totalReturned}件`}
+            sub={`赤字 ${summary.totalLoss}件 / 引き ${summary.totalReturned}件${summary.totalReturnFee > 0 ? ` (手数料 ${yen(summary.totalReturnFee)})` : ""}`}
             color="var(--ink-cyan)"
           />
           <SummaryCard
@@ -378,6 +406,12 @@ export default function AnalysisPage() {
                     <th className="text-right">仕入</th>
                     <th className="text-right">利益</th>
                     <th className="text-right">率</th>
+                    {summary.totalReturnFee > 0 && (
+                      <>
+                        <th className="text-right">引き</th>
+                        <th className="text-right">引き手数料</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -399,9 +433,33 @@ export default function AnalysisPage() {
                       <td className={`text-right ${b.profitRate < 0 ? "text-[var(--danger)]" : ""}`}>
                         {pct(b.profitRate)}
                       </td>
+                      {summary.totalReturnFee > 0 && (
+                        <>
+                          <td className="text-right text-[var(--fg-muted)]">
+                            {(b.returnCount || 0) > 0 ? `${b.returnCount}件` : ""}
+                          </td>
+                          <td className="text-right text-[var(--fg-muted)]">
+                            {(b.returnFee || 0) > 0 ? yen(b.returnFee || 0) : ""}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>
+                {summary.totalReturnFee > 0 && (
+                  <tfoot>
+                    <tr className="border-t-2 border-[var(--fg)]">
+                      <td className="font-bold">引き手数料合計</td>
+                      <td colSpan={4}></td>
+                      <td className="text-right font-bold">
+                        {buyerSummary.reduce((s, b) => s + (b.returnCount || 0), 0)}件
+                      </td>
+                      <td className="text-right font-bold">
+                        {yen(summary.totalReturnFee)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </div>
@@ -502,7 +560,10 @@ export default function AnalysisPage() {
                 </thead>
                 <tbody>
                   {filteredItems.map((r, i) => (
-                    <tr key={`${r.date}-${r.itemNo}-${i}`} className={r.profit < 0 ? "bg-[var(--danger-soft)]/40" : ""}>
+                    <tr
+                      key={`${r.date}-${r.itemNo}-${i}`}
+                      className={r.isReturned ? "bg-[var(--bg-muted)]/60" : r.profit < 0 ? "bg-[var(--danger-soft)]/40" : ""}
+                    >
                       <td>{dateLabel(r.date)}</td>
                       <td className="font-mono text-[12px]">{r.listingId}</td>
                       <td className="font-mono text-[12px]">{r.itemNo}</td>
@@ -511,12 +572,23 @@ export default function AnalysisPage() {
                       <td>{r.condition}</td>
                       <td>{r.buyer}</td>
                       <td className="text-right font-mono">{yen(r.purchaseTax)}</td>
-                      <td className="text-right font-mono">{yen(r.saleTax)}</td>
-                      <td className="text-right font-mono text-[var(--fg-muted)]">{yen(r.feeTax)}</td>
-                      <td className="text-right font-mono text-[var(--fg-muted)]">{r.campaignTax !== 0 ? yen(r.campaignTax) : ""}</td>
-                      <td className={`text-right font-mono font-bold ${r.profit < 0 ? "text-[var(--danger)]" : ""}`}>
-                        {yen(r.profit)}
-                      </td>
+                      {r.isReturned ? (
+                        <>
+                          <td className="text-center text-[var(--fg-muted)] font-bold italic" colSpan={3}>引き</td>
+                          <td className="text-right font-mono text-[var(--fg-muted)]">
+                            {r.returnFee > 0 ? `-${yen(r.returnFee)}` : ""}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="text-right font-mono">{yen(r.saleTax)}</td>
+                          <td className="text-right font-mono text-[var(--fg-muted)]">{yen(r.feeTax)}</td>
+                          <td className="text-right font-mono text-[var(--fg-muted)]">{r.campaignTax !== 0 ? yen(r.campaignTax) : ""}</td>
+                          <td className={`text-right font-mono font-bold ${r.profit < 0 ? "text-[var(--danger)]" : ""}`}>
+                            {yen(r.profit)}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>

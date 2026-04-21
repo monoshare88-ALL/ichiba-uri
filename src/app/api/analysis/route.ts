@@ -28,6 +28,7 @@ interface ProfitRow {
   saleTaxIncl: number;
   profit: number;
   isReturned: boolean;
+  returnFee: number;  // 引き手数料 (コメ兵: ¥500/件)
 }
 
 interface DateSummary {
@@ -48,6 +49,8 @@ interface GroupSummary {
   purchase: number;
   profit: number;
   profitRate: number;
+  returnCount?: number;
+  returnFee?: number;
 }
 
 // ------- helpers -------
@@ -242,6 +245,7 @@ function extractRows(
         saleTaxIncl: netSaleTaxIncl,
         profit,
         isReturned,
+        returnFee: isReturned ? 500 : 0,  // コメ兵: 引き手数料 ¥500/件
       });
     }
   }
@@ -475,6 +479,7 @@ function collectTabaRows(baseDir: string): ProfitRow[] {
         saleTaxIncl: netSaleTaxIncl,
         profit,
         isReturned: false,
+        returnFee: 0,
       });
     }
   }
@@ -496,8 +501,10 @@ function buildSummary(allRows: ProfitRow[]) {
   }
 
   const sold = unique.filter((r) => !r.isReturned && r.saleAmount > 0);
-  const profitRows = sold.filter((r) => r.purchase > 0 && r.profit !== 0);
+  const profitRows = sold.filter((r) => r.purchase > 0);
   const returned = unique.filter((r) => r.isReturned);
+  // 全商品 = 利益計算可能な商品 + 引き商品 (表示用)
+  const allDisplayRows = [...profitRows, ...returned.filter((r) => r.purchase > 0)];
 
   // date summary
   const byDate: Record<string, { count: number; lossCount: number; returnedCount: number; purchase: number; sale: number; profit: number }> = {};
@@ -550,18 +557,24 @@ function buildSummary(allRows: ProfitRow[]) {
       profitRate: d.purchase > 0 ? Math.round((d.profit / d.purchase) * 1000) / 10 : 0,
     }));
 
-  // buyer summary
-  const byBuyer: Record<string, { count: number; lossCount: number; purchase: number; profit: number }> = {};
+  // buyer summary (販売 + 引き)
+  const byBuyer: Record<string, { count: number; lossCount: number; purchase: number; profit: number; returnCount: number; returnFee: number }> = {};
   for (const r of profitRows) {
     const b = r.buyer || "(不明)";
-    if (!byBuyer[b]) byBuyer[b] = { count: 0, lossCount: 0, purchase: 0, profit: 0 };
+    if (!byBuyer[b]) byBuyer[b] = { count: 0, lossCount: 0, purchase: 0, profit: 0, returnCount: 0, returnFee: 0 };
     byBuyer[b].count++;
     byBuyer[b].purchase += r.purchaseTax;
     byBuyer[b].profit += r.profit;
     if (r.profit < 0) byBuyer[b].lossCount++;
   }
+  for (const r of returned) {
+    const b = r.buyer || "(不明)";
+    if (!byBuyer[b]) byBuyer[b] = { count: 0, lossCount: 0, purchase: 0, profit: 0, returnCount: 0, returnFee: 0 };
+    byBuyer[b].returnCount++;
+    byBuyer[b].returnFee += r.returnFee;
+  }
   const buyerSummary: GroupSummary[] = Object.entries(byBuyer)
-    .filter(([, d]) => d.count >= 2)
+    .filter(([, d]) => d.count >= 2 || d.returnCount > 0)
     .sort((a, b) => b[1].profit - a[1].profit)
     .map(([name, d]) => ({
       name,
@@ -570,6 +583,8 @@ function buildSummary(allRows: ProfitRow[]) {
       purchase: Math.round(d.purchase),
       profit: Math.round(d.profit),
       profitRate: d.purchase > 0 ? Math.round((d.profit / d.purchase) * 1000) / 10 : 0,
+      returnCount: d.returnCount,
+      returnFee: d.returnFee,
     }));
 
   // totals
@@ -577,12 +592,14 @@ function buildSummary(allRows: ProfitRow[]) {
   const totalProfit = profitRows.reduce((s, r) => s + r.profit, 0);
   const totalFee = profitRows.reduce((s, r) => s + r.feeTax, 0);
   const totalCampaign = profitRows.reduce((s, r) => s + r.campaignTax, 0);
+  const totalReturnFee = returned.reduce((s, r) => s + r.returnFee, 0);
 
   return {
     summary: {
       totalItems: profitRows.length,
       totalLoss: profitRows.filter((r) => r.profit < 0).length,
       totalReturned: returned.length,
+      totalReturnFee,
       totalPurchase: Math.round(totalPurchase),
       totalProfit: Math.round(totalProfit),
       totalFee: Math.round(totalFee),
@@ -592,7 +609,7 @@ function buildSummary(allRows: ProfitRow[]) {
     dateSummary,
     brandSummary,
     buyerSummary,
-    items: profitRows.map((r) => ({
+    items: allDisplayRows.map((r) => ({
       ...r,
       purchaseTax: Math.round(r.purchaseTax),
       saleTax: Math.round(r.saleTax),
