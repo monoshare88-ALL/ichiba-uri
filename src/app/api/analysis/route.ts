@@ -406,6 +406,7 @@ function collectTabaRows(baseDir: string): ProfitRow[] {
       else if (h === "ﾗﾝｸ" || h === "ランク") col.condition = c;
       else if (h.includes("指値")) col.reserve = c;
       else if (h === "バイヤー名" || h === "バイヤー") col.buyer = c;
+      else if (h === "バイヤー２") col.buyer2 = c;
       else if (h === "商品番号") col.item_no = c;
       else if (h === "仕入れ金額" || h === "仕入れ税抜き") col.purchase = c;
       else if (h === "仕入れ税込み") col.purchase_tax = c;
@@ -471,7 +472,14 @@ function collectTabaRows(baseDir: string): ProfitRow[] {
         brand: String(brand || ""),
         itemName: String(itemName || ""),
         condition: String(getCellVal(ws, r, col.condition ?? -1) || ""),
-        buyer: String(getCellVal(ws, r, col.buyer ?? -1) || ""),
+        buyer: (() => {
+          const b = String(getCellVal(ws, r, col.buyer ?? -1) || "");
+          if (b === "再販" && col.buyer2 != null) {
+            const b2 = String(getCellVal(ws, r, col.buyer2) || "");
+            return b2 ? `再販・${b2}` : "再販";
+          }
+          return b;
+        })(),
         itemNo: String(getCellVal(ws, r, col.item_no ?? -1) || ""),
         listingId,
         reserve: safeNum(getCellVal(ws, r, col.reserve ?? -1)),
