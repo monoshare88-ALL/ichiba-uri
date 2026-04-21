@@ -1658,13 +1658,13 @@ export default function Home() {
                 )}
                 <input
                   type="file"
-                  accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                  accept=".xlsx,.xls,.csv,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/pdf"
                   onChange={handleSalesImportFile}
                   className="hidden"
                 />
               </label>
               <span className="text-[11px] text-[var(--fg-muted)] leading-snug">
-                市場から受領したExcel/CSVの<strong>売り金額・手数料</strong>を、
+                市場から受領したExcel/CSV/PDFの<strong>売り金額・手数料</strong>を、
                 出品番号または商品番号で一致する行に反映します。
                 {settings.market ? (
                   <span className="text-[var(--fg-subtle)]">

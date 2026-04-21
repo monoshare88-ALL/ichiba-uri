@@ -246,8 +246,8 @@ function extractRows(
   return rows;
 }
 
-// ------- main analysis -------
-function runAnalysis(baseDir: string) {
+// ------- コメ兵 rows collector -------
+function collectKomehyoRows(baseDir: string): ProfitRow[] {
   const files = fs.readdirSync(baseDir)
     .filter((f: string) => f.startsWith("コメ") && f.endsWith("社内用.xlsx") && !f.includes("競合"))
     .sort();
@@ -328,6 +328,149 @@ function runAnalysis(baseDir: string) {
     }
   }
 
+  return allRows;
+}
+
+// ------- 市場連盟 (TABA) rows collector -------
+function collectTabaRows(baseDir: string): ProfitRow[] {
+  const files = fs.readdirSync(baseDir)
+    .filter((f: string) => f.includes("バイヤー用") && (f.endsWith(".xlsm") || f.endsWith(".xlsx")))
+    .sort();
+
+  const allRows: ProfitRow[] = [];
+
+  for (const fname of files) {
+    // 日付抽出: "...バイヤー用250502.xlsm" / "...バイヤー用2501002.xlsm" / "...2024.12.02バイヤー用.xlsm"
+    let dateStr: string | null = null;
+    const mDigits = fname.match(/バイヤー用(\d+)\./);
+    const mDot = fname.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+    if (mDigits) {
+      const d = mDigits[1];
+      if (d.length === 6) {
+        // YYMMDD (例: 250502 = 25/05/02)
+        dateStr = d;
+      } else if (d.length === 7) {
+        // YY + 0MM + DD (例: 2501002 → YY=25, MM=10, DD=02)
+        dateStr = d.slice(0, 2) + d.slice(3, 5) + d.slice(5, 7);
+      }
+    } else if (mDot) {
+      dateStr = mDot[1].slice(2) + mDot[2] + mDot[3]; // "2024.12.02" -> "241202"
+    }
+    if (!dateStr) continue;
+
+    const filepath = path.join(baseDir, fname);
+    let wb: XLSX.WorkBook;
+    try {
+      const buf = fs.readFileSync(filepath);
+      wb = XLSX.read(buf, { type: "buffer" });
+    } catch {
+      continue;
+    }
+
+    // 入力用ｼｰﾄ を探す
+    const sheetName = wb.SheetNames.find((sn: string) => sn.includes("入力"));
+    if (!sheetName) continue;
+    const ws = wb.Sheets[sheetName];
+    const range = getSheetRange(ws);
+    if (!range) continue;
+
+    // ヘッダー検出 (row 0)
+    const headers: Record<number, string> = {};
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const v = getCellVal(ws, 0, c);
+      if (v != null) headers[c] = String(v).trim();
+    }
+
+    // カラム位置を検出 (フォーマットA/B自動判定)
+    const col: Record<string, number> = {};
+    for (const [cStr, h] of Object.entries(headers)) {
+      const c = Number(cStr);
+      if (h === "ﾌﾞﾗﾝﾄﾞ名" || h === "ブランド名") col.brand = c;
+      else if (h === "ﾓﾃﾞﾙ名" || h === "モデル名") col.item_name = c;
+      else if (h === "品名") col.category = c;
+      else if (h === "ﾗﾝｸ" || h === "ランク") col.condition = c;
+      else if (h.includes("指値")) col.reserve = c;
+      else if (h === "バイヤー名" || h === "バイヤー") col.buyer = c;
+      else if (h === "商品番号") col.item_no = c;
+      else if (h === "仕入れ金額" || h === "仕入れ税抜き") col.purchase = c;
+      else if (h === "仕入れ税込み") col.purchase_tax = c;
+      else if (h === "税込み" && col.purchase != null && c === col.purchase + 1) col.purchase_tax = c;
+      else if (h === "売り" || h === "売り金額") col.sale = c;
+      else if (h === "売り税込み") col.sale_tax = c;
+      else if (h === "手数料" && col.sale != null) col.fee = c;
+      else if (h === "手数料税込み") col.fee_tax = c;
+      else if (h === "粗利") col.gross = c;
+      else if (h === "通番") col.listing = c;
+    }
+
+    // brand列がヘッダーなしの場合 (バイヤー用で消える場合) — category+1 or固定位置
+    if (col.brand == null && col.category != null) col.brand = col.category + 1;
+
+    // 売り税込みが別列でない場合、売りの次を確認
+    if (col.sale_tax == null && col.sale != null) {
+      const nextH = headers[col.sale + 1];
+      if (nextH && (nextH.includes("税込") || nextH === "売り税込み")) col.sale_tax = col.sale + 1;
+    }
+
+    for (let r = 1; r <= range.e.r; r++) {
+      const sale = safeNum(getCellVal(ws, r, col.sale ?? -1));
+      if (sale <= 0) continue; // 販売データなしはスキップ
+
+      const brand = getCellVal(ws, r, col.brand ?? -1);
+      const itemName = getCellVal(ws, r, col.item_name ?? -1);
+      const purchase = safeNum(getCellVal(ws, r, col.purchase ?? -1));
+      let purchaseTax = safeNum(getCellVal(ws, r, col.purchase_tax ?? -1));
+      if (purchaseTax === 0 && purchase > 0) purchaseTax = Math.round(purchase * 1.1);
+
+      const saleTax = col.sale_tax != null ? safeNum(getCellVal(ws, r, col.sale_tax)) : Math.round(sale * 1.1);
+      const fee = safeNum(getCellVal(ws, r, col.fee ?? -1));
+      const feeTaxRaw = safeNum(getCellVal(ws, r, col.fee_tax ?? -1));
+
+      // Format A (手数料税込み列あり): 手数料=税抜き, 手数料税込み=税込み → feeTax列を使う
+      // Format B (手数料税込み列なし): 手数料=売り税込み×料率の最終金額 → そのまま使う
+      let feeTax: number;
+      if (col.fee_tax != null && feeTaxRaw > 0) {
+        feeTax = feeTaxRaw; // Format A: 手数料税込み列から
+      } else {
+        feeTax = fee;       // Format B: 手数料がそのまま最終金額
+      }
+
+      // 利益 = 売り税込み - 手数料(最終金額) - 仕入れ税込み
+      const netSaleTaxIncl = saleTax - feeTax;
+      const profit = netSaleTaxIncl - purchaseTax;
+
+      const feeRate = sale > 0 && fee > 0 ? Math.round((fee / sale) * 1000) / 10 : 0;
+
+      allRows.push({
+        date: dateStr,
+        source: sheetName,
+        brand: String(brand || ""),
+        itemName: String(itemName || ""),
+        condition: String(getCellVal(ws, r, col.condition ?? -1) || ""),
+        buyer: String(getCellVal(ws, r, col.buyer ?? -1) || ""),
+        itemNo: String(getCellVal(ws, r, col.item_no ?? -1) || ""),
+        reserve: safeNum(getCellVal(ws, r, col.reserve ?? -1)),
+        purchase,
+        purchaseTax,
+        saleAmount: sale,
+        fee,
+        feeTax,
+        feeRate,
+        campaign: 0,
+        campaignTax: 0,
+        saleTax,
+        saleTaxIncl: netSaleTaxIncl,
+        profit,
+        isReturned: false,
+      });
+    }
+  }
+
+  return allRows;
+}
+
+// ------- 集計 (共通) -------
+function buildSummary(allRows: ProfitRow[]) {
   // dedupe
   const seen = new Set<string>();
   const unique: ProfitRow[] = [];
@@ -419,8 +562,8 @@ function runAnalysis(baseDir: string) {
   // totals
   const totalPurchase = profitRows.reduce((s, r) => s + r.purchaseTax, 0);
   const totalProfit = profitRows.reduce((s, r) => s + r.profit, 0);
-  const totalFee = profitRows.reduce((s, r) => s + Math.round(r.fee * 1.1), 0);
-  const totalCampaign = profitRows.reduce((s, r) => s + Math.round(r.campaign * 1.1), 0);
+  const totalFee = profitRows.reduce((s, r) => s + r.feeTax, 0);
+  const totalCampaign = profitRows.reduce((s, r) => s + r.campaignTax, 0);
 
   return {
     summary: {
@@ -446,11 +589,25 @@ function runAnalysis(baseDir: string) {
   };
 }
 
-export async function GET() {
-  const baseDir = "D:/JP Dropbox/バイヤー用/あご表/コメ兵";
+// ------- market configs -------
+const MARKET_CONFIGS: Record<string, { baseDir: string; collector: (dir: string) => ProfitRow[] }> = {
+  komehyo: { baseDir: "D:/JP Dropbox/バイヤー用/あご表/コメ兵", collector: collectKomehyoRows },
+  taba:    { baseDir: "D:/JP Dropbox/バイヤー用/あご表/市場連盟", collector: collectTabaRows },
+};
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const market = searchParams.get("market") || "komehyo";
+  const config = MARKET_CONFIGS[market];
+
+  if (!config) {
+    return NextResponse.json({ error: `Unknown market: ${market}` }, { status: 400 });
+  }
+
   try {
-    const data = runAnalysis(baseDir);
-    return NextResponse.json(data);
+    const rows = config.collector(config.baseDir);
+    const data = buildSummary(rows);
+    return NextResponse.json({ ...data, market });
   } catch (e: unknown) {
     console.error("[analysis] error:", e);
     const msg = e instanceof Error ? e.message : "Unknown error";

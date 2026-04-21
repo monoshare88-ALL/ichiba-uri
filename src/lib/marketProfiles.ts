@@ -144,12 +144,119 @@ const KOMEHYO: MarketProfile = {
 };
 
 /* ================================================================
+ *  市場連盟 (TABA) プロファイル
+ * ================================================================ */
+
+const TABA: MarketProfile = {
+  id: "taba",
+  name: "市場連盟",
+  description: "市場連盟(TABA) — 入力用ｼｰﾄからデータ取込、印刷用・入力例はスキップ",
+
+  import: {
+    skipSheetPatterns: ["印刷用", "入力例"],
+    headerAliases: {
+      item_number:    ["商品番号", "item_number"],
+      listing_number: ["通番", "listing_number"],
+      brand:          ["ﾌﾞﾗﾝﾄﾞ名", "ブランド名", "ブランド", "brand"],
+      item_name:      ["ﾓﾃﾞﾙ名", "モデル名", "商品名", "item_name"],
+      accessories:    ["付属品", "accessories"],
+      condition:      ["ﾗﾝｸ", "ランク", "状態", "condition"],
+      reserve_price:  ["指値（税抜）", "指値", "reserve_price"],
+      buyer:          ["バイヤー名", "バイヤー", "buyer"],
+      purchase_price: ["仕入れ金額", "仕入価格", "買値", "purchase_price"],
+      sale_price:     ["販売価格", "売値", "sale_price"],
+      sale_amount:    ["売り", "売り金額", "sale_amount"],
+      fee:            ["手数料", "fee"],
+      lot_no:         ["頁", "lot_no"],
+      box_no:         ["箱番", "box_no"],
+    },
+  },
+
+  // 社内用 (バイヤー用フォーマット — 入力用ｼｰﾄ準拠)
+  internalColumns: [
+    { header: "通番",           field: "LISTING_NUMBER" as ColumnFieldType,            width: 6 },
+    { header: "頁",             field: "LOT_NO" as ColumnFieldType,                    width: 6 },
+    { header: "箱番",           field: "BOX_NO" as ColumnFieldType,                    width: 8 },
+    { header: "枝番",           field: "EMPTY" as ColumnFieldType,                     width: 6 },
+    { header: "品名",           field: "EMPTY" as ColumnFieldType,                     width: 14 },
+    { header: "ﾌﾞﾗﾝﾄﾞ名",      field: "BRAND" as ColumnFieldType,                     width: 14 },
+    { header: "ﾗｲﾝ",           field: "EMPTY" as ColumnFieldType,                     width: 12 },
+    { header: "ﾓﾃﾞﾙ名",        field: "ITEM_NAME" as ColumnFieldType,                 width: 28 },
+    { header: "型番",           field: "EMPTY" as ColumnFieldType,                     width: 12 },
+    { header: "ｼﾘｱﾙ",          field: "EMPTY" as ColumnFieldType,                     width: 12 },
+    { header: "ｶﾗｰ",           field: "EMPTY" as ColumnFieldType,                     width: 10 },
+    { header: "素材",           field: "EMPTY" as ColumnFieldType,                     width: 10 },
+    { header: "ﾗﾝｸ",           field: "CONDITION_RAW" as ColumnFieldType,             width: 8 },
+    { header: "付属品",         field: "ACCESSORIES" as ColumnFieldType,               width: 18 },
+    { header: "特徴",           field: "EMPTY" as ColumnFieldType,                     width: 18 },
+    { header: "欠点",           field: "EMPTY" as ColumnFieldType,                     width: 18 },
+    { header: "別展",           field: "EMPTY" as ColumnFieldType,                     width: 6 },
+    { header: "指値（税抜）",   field: "RESERVE_PRICE" as ColumnFieldType,             width: 12 },
+    { header: "",               field: "EMPTY" as ColumnFieldType,                     width: 4 },
+    { header: "",               field: "EMPTY" as ColumnFieldType,                     width: 4 },
+    { header: "商品番号",       field: "ITEM_NUMBER" as ColumnFieldType,               width: 12 },
+    { header: "仕入れ金額",     field: "PURCHASE_PRICE" as ColumnFieldType,            width: 12 },
+    { header: "税込み",         field: "PURCHASE_PRICE_TAX_INCL" as ColumnFieldType,   width: 12 },
+    { header: "バイヤー名",     field: "BUYER" as ColumnFieldType,                     width: 10 },
+    { header: "バイヤー２",     field: "EMPTY" as ColumnFieldType,                     width: 10 },
+    { header: "難点",           field: "EMPTY" as ColumnFieldType,                     width: 18 },
+    { header: "",               field: "EMPTY" as ColumnFieldType,                     width: 4 },
+    { header: "売り",           field: "SALE_AMOUNT" as ColumnFieldType,               width: 12 },
+    { header: "売り税込み",     field: "SALE_AMOUNT_TAX_INCL" as ColumnFieldType,      width: 12 },
+    { header: "手数料",         field: "FEE" as ColumnFieldType,                       width: 12 },
+    { header: "",               field: "EMPTY" as ColumnFieldType,                     width: 4 },
+    { header: "粗利",           field: "GROSS_PROFIT" as ColumnFieldType,              width: 12 },
+  ],
+
+  // 提出用 (JP.Company フォーマット — 入力用ｼｰﾄ B:S)
+  submissionColumns: [
+    { header: "通番",           field: "LISTING_NUMBER" as ColumnFieldType,            width: 6 },
+    { header: "頁",             field: "EMPTY" as ColumnFieldType,                     width: 6 },
+    { header: "箱番",           field: "EMPTY" as ColumnFieldType,                     width: 8 },
+    { header: "枝番",           field: "EMPTY" as ColumnFieldType,                     width: 6 },
+    { header: "品名",           field: "EMPTY" as ColumnFieldType,                     width: 14 },
+    { header: "ﾌﾞﾗﾝﾄﾞ名",      field: "BRAND" as ColumnFieldType,                     width: 14 },
+    { header: "ﾗｲﾝ",           field: "EMPTY" as ColumnFieldType,                     width: 12 },
+    { header: "ﾓﾃﾞﾙ名",        field: "ITEM_NAME" as ColumnFieldType,                 width: 28 },
+    { header: "型番",           field: "EMPTY" as ColumnFieldType,                     width: 12 },
+    { header: "ｼﾘｱﾙ",          field: "EMPTY" as ColumnFieldType,                     width: 12 },
+    { header: "ｶﾗｰ",           field: "EMPTY" as ColumnFieldType,                     width: 10 },
+    { header: "素材",           field: "EMPTY" as ColumnFieldType,                     width: 10 },
+    { header: "ﾗﾝｸ",           field: "CONDITION_RAW" as ColumnFieldType,             width: 8 },
+    { header: "付属品",         field: "ACCESSORIES" as ColumnFieldType,               width: 18 },
+    { header: "特徴",           field: "EMPTY" as ColumnFieldType,                     width: 18 },
+    { header: "欠点",           field: "EMPTY" as ColumnFieldType,                     width: 18 },
+    { header: "別展",           field: "EMPTY" as ColumnFieldType,                     width: 6 },
+    { header: "指値（税抜）",   field: "RESERVE_PRICE" as ColumnFieldType,             width: 12 },
+  ],
+
+  // 売上取込 (売り入札結果はJPGスキャンのみ、Excel売上明細なし)
+  // バイヤー用ファイルの売り列から手動取込を想定
+  salesImport: {
+    columns: [
+      { header: "通番",           field: "LISTING_NUMBER" as ColumnFieldType,            width: 8 },
+      { header: "売り",           field: "SALE_AMOUNT" as ColumnFieldType,               width: 12 },
+      { header: "手数料",         field: "FEE" as ColumnFieldType,                       width: 12 },
+    ],
+    headerMap: {
+      "通番":                     "LISTING_NUMBER",
+      "商品番号":                 "ITEM_NUMBER",
+      "売り":                     "SALE_AMOUNT",
+      "売り金額":                 "SALE_AMOUNT",
+      "成立金額":                 "SALE_AMOUNT",
+      "手数料":                   "FEE",
+    },
+  },
+};
+
+/* ================================================================
  *  プロファイル登録 & ユーティリティ
  * ================================================================ */
 
 /** 全プロファイル (市場名→プロファイル) */
 const PROFILES: Record<string, MarketProfile> = {
   "コメ兵": KOMEHYO,
+  "市場連盟": TABA,
 };
 
 /** 登録済み市場名の一覧を返す */

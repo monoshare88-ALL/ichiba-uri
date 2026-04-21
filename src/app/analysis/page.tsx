@@ -80,7 +80,13 @@ const dateLabel = (d: string) => {
 type SortKey = "date" | "brand" | "itemName" | "itemNo" | "buyer" | "purchaseTax" | "saleTax" | "feeTax" | "campaignTax" | "profit";
 type SortDir = "asc" | "desc";
 
+const MARKETS = [
+  { id: "komehyo", name: "コメ兵" },
+  { id: "taba", name: "市場連盟" },
+];
+
 export default function AnalysisPage() {
+  const [market, setMarket] = useState("komehyo");
   const [data, setData] = useState<AnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,8 +105,13 @@ export default function AnalysisPage() {
   // tab
   const [activeTab, setActiveTab] = useState<"summary" | "items">("summary");
 
-  useEffect(() => {
-    fetch("/api/analysis")
+  const loadMarket = (id: string) => {
+    setMarket(id);
+    setData(null);
+    setLoading(true);
+    setError(null);
+    setFilterDate(""); setFilterBrand(""); setFilterBuyer(""); setFilterText(""); setShowLossOnly(false);
+    fetch(`/api/analysis?market=${id}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
@@ -108,6 +119,11 @@ export default function AnalysisPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadMarket("komehyo");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredItems = useMemo(() => {
@@ -161,13 +177,34 @@ export default function AnalysisPage() {
   const uniqueBrands = useMemo(() => data ? [...new Set(data.items.map((r) => r.brand))].filter(Boolean).sort() : [], [data]);
   const uniqueBuyers = useMemo(() => data ? [...new Set(data.items.map((r) => r.buyer))].filter(Boolean).sort() : [], [data]);
 
+  const marketName = MARKETS.find((m) => m.id === market)?.name || market;
+
+  // 市場切替タブ (ローディング中・エラー時にも表示)
+  const marketTabs = (
+    <div className="flex gap-1.5">
+      {MARKETS.map((m) => (
+        <button
+          key={m.id}
+          onClick={() => loadMarket(m.id)}
+          disabled={loading}
+          className={`btn btn-sm ${market === m.id ? "btn-primary" : ""}`}
+        >
+          {m.name}
+        </button>
+      ))}
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-4xl mb-4 animate-bounce">📊</div>
-          <p className="text-lg font-bold">分析中...</p>
-          <p className="text-sm text-[var(--fg-muted)] mt-1">コメ兵の社内用Excelを読み取っています</p>
+      <div className="min-h-screen">
+        <AnalysisHeader marketName={marketName} marketTabs={marketTabs} />
+        <div className="flex items-center justify-center" style={{ minHeight: "60vh" }}>
+          <div className="text-center">
+            <div className="text-4xl mb-4 animate-bounce">📊</div>
+            <p className="text-lg font-bold">分析中...</p>
+            <p className="text-sm text-[var(--fg-muted)] mt-1">{marketName}のExcelを読み取っています</p>
+          </div>
         </div>
       </div>
     );
@@ -175,11 +212,13 @@ export default function AnalysisPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="panel p-8 max-w-md text-center">
-          <p className="text-lg font-bold text-[var(--danger)]">エラー</p>
-          <p className="text-sm mt-2">{error}</p>
-          <a href="/" className="btn btn-sm btn-primary mt-4">戻る</a>
+      <div className="min-h-screen">
+        <AnalysisHeader marketName={marketName} marketTabs={marketTabs} />
+        <div className="flex items-center justify-center" style={{ minHeight: "60vh" }}>
+          <div className="panel p-8 max-w-md text-center">
+            <p className="text-lg font-bold text-[var(--danger)]">エラー</p>
+            <p className="text-sm mt-2">{error}</p>
+          </div>
         </div>
       </div>
     );
@@ -190,41 +229,7 @@ export default function AnalysisPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-[var(--bg)]/90 backdrop-blur-md border-b border-[var(--border)]">
-        <div className="max-w-[1920px] mx-auto px-4 md:px-6 h-14 flex items-center gap-4">
-          <a
-            href="/"
-            className="w-14 h-14 flex items-center justify-center text-[28px] font-black italic"
-            style={{
-              background: "var(--ink-cyan)",
-              border: "3px solid var(--fg)",
-              borderRadius: "18px",
-              boxShadow: "0 5px 0 var(--fg), inset 0 2px 0 rgba(255,255,255,0.6)",
-              color: "var(--fg)",
-              lineHeight: 1,
-              fontFamily: "var(--font-display)",
-            }}
-          >
-            A
-          </a>
-          <div className="flex flex-col leading-none">
-            <h1 className="display text-[26px]">過去結果分析</h1>
-            <div className="mt-2">
-              <span className="ink-tag ink-tag-lime">コメ兵</span>
-            </div>
-          </div>
-
-          <div className="ml-auto flex items-center gap-1.5">
-            <a href="/" className="btn btn-ghost btn-sm">
-              <span className="text-xs">← あご表作成</span>
-            </a>
-            <a href="/settings" className="btn btn-ghost btn-sm" title="設定">
-              <span className="text-base leading-none">⚙</span>
-            </a>
-          </div>
-        </div>
-      </header>
+      <AnalysisHeader marketName={marketName} marketTabs={marketTabs} />
 
       <main className="max-w-[1920px] mx-auto px-4 md:px-6 py-6 space-y-6">
         {/* Summary Cards */}
@@ -256,16 +261,18 @@ export default function AnalysisPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {marketTabs}
+          <div className="h-6 w-px bg-[var(--border)] mx-1" />
           <button
             onClick={() => setActiveTab("summary")}
-            className={`btn btn-sm ${activeTab === "summary" ? "btn-primary" : ""}`}
+            className={`btn btn-sm ${activeTab === "summary" ? "btn-secondary" : ""}`}
           >
             集計
           </button>
           <button
             onClick={() => setActiveTab("items")}
-            className={`btn btn-sm ${activeTab === "items" ? "btn-primary" : ""}`}
+            className={`btn btn-sm ${activeTab === "items" ? "btn-secondary" : ""}`}
           >
             商品一覧 ({data.items.length}件)
           </button>
@@ -533,6 +540,47 @@ function SummaryCard({ label, value, sub, color }: { label: string; value: strin
       </p>
       <p className="text-[11px] text-[var(--fg-muted)] mt-1">{sub}</p>
     </div>
+  );
+}
+
+function AnalysisHeader({ marketName, marketTabs }: { marketName: string; marketTabs: React.ReactNode }) {
+  return (
+    <header className="sticky top-0 z-30 bg-[var(--bg)]/90 backdrop-blur-md border-b border-[var(--border)]">
+      <div className="max-w-[1920px] mx-auto px-4 md:px-6 h-14 flex items-center gap-4">
+        <a
+          href="/"
+          className="w-14 h-14 flex items-center justify-center text-[28px] font-black italic"
+          style={{
+            background: "var(--ink-cyan)",
+            border: "3px solid var(--fg)",
+            borderRadius: "18px",
+            boxShadow: "0 5px 0 var(--fg), inset 0 2px 0 rgba(255,255,255,0.6)",
+            color: "var(--fg)",
+            lineHeight: 1,
+            fontFamily: "var(--font-display)",
+          }}
+        >
+          A
+        </a>
+        <div className="flex flex-col leading-none">
+          <h1 className="display text-[26px]">過去結果分析</h1>
+          <div className="mt-2">
+            <span className="ink-tag ink-tag-lime">{marketName}</span>
+          </div>
+        </div>
+
+        <div className="hidden md:flex items-center">{marketTabs}</div>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          <a href="/" className="btn btn-ghost btn-sm">
+            <span className="text-xs">← あご表作成</span>
+          </a>
+          <a href="/settings" className="btn btn-ghost btn-sm" title="設定">
+            <span className="text-base leading-none">⚙</span>
+          </a>
+        </div>
+      </div>
+    </header>
   );
 }
 
