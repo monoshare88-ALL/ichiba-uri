@@ -425,6 +425,13 @@ function collectTabaRows(baseDir: string): ProfitRow[] {
     // brand列がヘッダーなしの場合 (バイヤー用で消える場合) — category+1 or固定位置
     if (col.brand == null && col.category != null) col.brand = col.category + 1;
 
+    // バイヤー名がヘッダーなしの場合 (241202旧フォーマット: 仕入れ列の直前)
+    if (col.buyer == null && col.purchase != null) {
+      // 仕入れ列の1つ前にデータがあるか確認
+      const testVal = getCellVal(ws, 1, col.purchase - 1);
+      if (testVal && typeof testVal === "string") col.buyer = col.purchase - 1;
+    }
+
     // 売り税込みが別列でない場合、売りの次を確認
     if (col.sale_tax == null && col.sale != null) {
       const nextH = headers[col.sale + 1];
