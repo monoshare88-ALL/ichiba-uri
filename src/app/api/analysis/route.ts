@@ -14,6 +14,7 @@ interface ProfitRow {
   condition: string;
   buyer: string;
   itemNo: string;
+  listingId: string;  // 出品番号: コメ兵=A-1, 市場連盟=186-3
   reserve: number;
   purchase: number;
   purchaseTax: number;
@@ -226,7 +227,8 @@ function extractRows(
         itemName: String(itemName || ""),
         condition: String(getCellVal(sheet, r, col.condition ?? -1) || ""),
         buyer: String(getCellVal(sheet, r, col.buyer ?? -1) || ""),
-        itemNo: String(getCellVal(sheet, r, col.item_no ?? col.listing_id ?? -1) || ""),
+        itemNo: String(getCellVal(sheet, r, col.item_no ?? -1) || ""),
+        listingId: String(getCellVal(sheet, r, col.listing_id ?? -1) || ""),
         reserve: safeNum(getCellVal(sheet, r, col.reserve ?? -1)),
         purchase,
         purchaseTax,
@@ -315,6 +317,7 @@ function collectKomehyoRows(baseDir: string): ProfitRow[] {
                 itemName: r.itemName || src.itemName,
                 condition: r.condition || src.condition,
                 buyer: r.buyer || src.buyer,
+                listingId: r.listingId || src.listingId,
                 purchase: r.purchase || src.purchase,
                 purchaseTax: r.purchaseTax || src.purchaseTax,
                 reserve: r.reserve || src.reserve,
@@ -401,6 +404,9 @@ function collectTabaRows(baseDir: string): ProfitRow[] {
       else if (h === "手数料税込み") col.fee_tax = c;
       else if (h === "粗利") col.gross = c;
       else if (h === "通番") col.listing = c;
+      else if (h === "箱番") col.box = c;
+      else if (h === "枝番") col.branch = c;
+      else if (h === "頁") col.page = c;
     }
 
     // brand列がヘッダーなしの場合 (バイヤー用で消える場合) — category+1 or固定位置
@@ -412,6 +418,8 @@ function collectTabaRows(baseDir: string): ProfitRow[] {
       if (nextH && (nextH.includes("税込") || nextH === "売り税込み")) col.sale_tax = col.sale + 1;
     }
 
+    // 箱番はマージセルで10行に1つ → 前の値を引き継ぐ
+    let lastBox = "";
     for (let r = 1; r <= range.e.r; r++) {
       const sale = safeNum(getCellVal(ws, r, col.sale ?? -1));
       if (sale <= 0) continue; // 販売データなしはスキップ
@@ -426,20 +434,24 @@ function collectTabaRows(baseDir: string): ProfitRow[] {
       const fee = safeNum(getCellVal(ws, r, col.fee ?? -1));
       const feeTaxRaw = safeNum(getCellVal(ws, r, col.fee_tax ?? -1));
 
-      // Format A (手数料税込み列あり): 手数料=税抜き, 手数料税込み=税込み → feeTax列を使う
-      // Format B (手数料税込み列なし): 手数料=売り税込み×料率の最終金額 → そのまま使う
       let feeTax: number;
       if (col.fee_tax != null && feeTaxRaw > 0) {
-        feeTax = feeTaxRaw; // Format A: 手数料税込み列から
+        feeTax = feeTaxRaw;
       } else {
-        feeTax = fee;       // Format B: 手数料がそのまま最終金額
+        feeTax = fee;
       }
 
-      // 利益 = 売り税込み - 手数料(最終金額) - 仕入れ税込み
       const netSaleTaxIncl = saleTax - feeTax;
       const profit = netSaleTaxIncl - purchaseTax;
 
       const feeRate = sale > 0 && fee > 0 ? Math.round((fee / sale) * 1000) / 10 : 0;
+
+      // 箱番-枝番の構築 (箱番はマージセルなので前の値を引き継ぐ)
+      const boxVal = getCellVal(ws, r, col.box ?? -1);
+      if (boxVal) lastBox = String(boxVal);
+      const branchVal = getCellVal(ws, r, col.branch ?? -1);
+      const branchStr = branchVal ? String(branchVal) : "";
+      const listingId = lastBox && branchStr ? `${lastBox}-${branchStr}` : "";
 
       allRows.push({
         date: dateStr,
@@ -449,6 +461,7 @@ function collectTabaRows(baseDir: string): ProfitRow[] {
         condition: String(getCellVal(ws, r, col.condition ?? -1) || ""),
         buyer: String(getCellVal(ws, r, col.buyer ?? -1) || ""),
         itemNo: String(getCellVal(ws, r, col.item_no ?? -1) || ""),
+        listingId,
         reserve: safeNum(getCellVal(ws, r, col.reserve ?? -1)),
         purchase,
         purchaseTax,

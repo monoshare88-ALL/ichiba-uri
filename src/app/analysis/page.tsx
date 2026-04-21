@@ -10,6 +10,7 @@ interface ProfitRow {
   condition: string;
   buyer: string;
   itemNo: string;
+  listingId: string;
   reserve: number;
   purchase: number;
   purchaseTax: number;
@@ -77,7 +78,7 @@ const dateLabel = (d: string) => {
   return `20${yy}/${mm}/${dd}`;
 };
 
-type SortKey = "date" | "brand" | "itemName" | "itemNo" | "buyer" | "purchaseTax" | "saleTax" | "feeTax" | "campaignTax" | "profit";
+type SortKey = "date" | "brand" | "itemName" | "itemNo" | "listingId" | "buyer" | "purchaseTax" | "saleTax" | "feeTax" | "campaignTax" | "profit";
 type SortDir = "asc" | "desc";
 
 const MARKETS = [
@@ -134,7 +135,7 @@ export default function AnalysisPage() {
     if (filterBuyer) items = items.filter((r) => r.buyer === filterBuyer);
     if (filterText) {
       const q = filterText.toLowerCase();
-      items = items.filter((r) => r.itemName.toLowerCase().includes(q) || r.brand.toLowerCase().includes(q) || r.itemNo.includes(q));
+      items = items.filter((r) => r.itemName.toLowerCase().includes(q) || r.brand.toLowerCase().includes(q) || r.itemNo.includes(q) || r.listingId.includes(q));
     }
     if (showLossOnly) items = items.filter((r) => r.profit < 0);
 
@@ -486,6 +487,7 @@ export default function AnalysisPage() {
                 <thead>
                   <tr>
                     <Th label="日付" sortKey="date" current={sortKey} dir={sortDir} onClick={handleSort} indicator={sortIndicator} />
+                    <Th label="出品番号" sortKey="listingId" current={sortKey} dir={sortDir} onClick={handleSort} indicator={sortIndicator} />
                     <Th label="商品番号" sortKey="itemNo" current={sortKey} dir={sortDir} onClick={handleSort} indicator={sortIndicator} />
                     <Th label="ブランド" sortKey="brand" current={sortKey} dir={sortDir} onClick={handleSort} indicator={sortIndicator} />
                     <Th label="商品名" sortKey="itemName" current={sortKey} dir={sortDir} onClick={handleSort} indicator={sortIndicator} />
@@ -502,6 +504,7 @@ export default function AnalysisPage() {
                   {filteredItems.map((r, i) => (
                     <tr key={`${r.date}-${r.itemNo}-${i}`} className={r.profit < 0 ? "bg-[var(--danger-soft)]/40" : ""}>
                       <td>{dateLabel(r.date)}</td>
+                      <td className="font-mono text-[12px]">{r.listingId}</td>
                       <td className="font-mono text-[12px]">{r.itemNo}</td>
                       <td className="max-w-[120px] truncate" title={r.brand}>{r.brand}</td>
                       <td className="max-w-[240px] truncate" title={r.itemName}>{r.itemName}</td>
