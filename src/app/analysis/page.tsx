@@ -643,7 +643,7 @@ function ReturnFeePeriodPanel({
     <div className="panel p-3">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-[12px] font-bold">
-          引き手数料 合計 {yen(summary.totalReturnFee)}���{summary.totalReturned}件 × ¥500）
+          引き手数料 合計 {yen(summary.totalReturnFee)}（{summary.totalReturned}件 × ¥500）
         </span>
         <select
           value={selected}
