@@ -1027,6 +1027,82 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
+  // 売上タブCSV出力
+  const exportSalesCsv = () => {
+    const salesRows = rows.filter(r => r.itemNumber);
+    if (salesRows.length === 0) {
+      alert("出力するデータがありません");
+      return;
+    }
+    const taxRate = settings.taxRate || 10;
+    const taxMul = 1 + taxRate / 100;
+    const getGP = (r: RowData) => {
+      const sa = parseFloat(r.saleAmount);
+      const fe = parseFloat(r.fee);
+      if (!Number.isFinite(sa) || sa === 0) return 0;
+      return (sa - (Number.isFinite(fe) ? fe : 0)) * taxMul;
+    };
+    const getGPwithCB = (r: RowData) => {
+      const gp = getGP(r);
+      const cb = parseFloat(r.campaign);
+      return gp + (Number.isFinite(cb) ? cb * taxMul : 0);
+    };
+    const getUnsoldFee = (r: RowData) => (r.saleAmount === "0" || r.saleAmount === "") ? 500 : 0;
+
+    const headers = [
+      "出品番号", "商品番号", "ブランド", "品名", "状態", "フラグ",
+      "指値", "バイヤー", "仕入価格", "売り金額", "手数料",
+      "キャンペーンCB", "不落札手数料", "粗利", "粗利(CB込)",
+    ];
+    const csvRows = salesRows.map(r => {
+      const flags = [
+        r.soldOut ? "売切" : "",
+        r.tkb ? "TKB" : "",
+        r.broken ? "壊れ" : "",
+        r.copy ? "コピー" : "",
+      ].filter(Boolean).join("/");
+      const title = r.geminiTitle?.trim() || r.kintoneTitle?.trim() || r.itemName || "";
+      const gp = getGP(r);
+      const gpCB = getGPwithCB(r);
+      return [
+        r.listingNumber,
+        r.itemNumber,
+        r.brand,
+        title,
+        r.condition,
+        flags,
+        r.reservePrice,
+        r.buyer,
+        r.purchasePrice,
+        r.saleAmount,
+        r.fee,
+        r.campaign,
+        String(getUnsoldFee(r) || ""),
+        gp ? String(Math.round(gp)) : "",
+        gpCB !== gp ? String(Math.round(gpCB)) : "",
+      ];
+    });
+
+    const esc = (v: string) => {
+      if (!v) return "";
+      if (v.includes(",") || v.includes('"') || v.includes("\n")) {
+        return '"' + v.replace(/"/g, '""') + '"';
+      }
+      return v;
+    };
+    const csv = "\uFEFF" + [headers, ...csvRows].map(row => row.map(esc).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeName = (fileName || "あご表").trim() || "あご表";
+    const safeFileName = `${safeName}_売上_${new Date().toISOString().slice(0, 10)}`
+      .replace(/[\\/:*?"<>|]/g, "_");
+    a.download = `${safeFileName}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
       {/* ===================== App Bar ===================== */}
@@ -1715,6 +1791,12 @@ export default function Home() {
                   className="hidden"
                 />
               </label>
+              <button
+                className="btn"
+                onClick={exportSalesCsv}
+              >
+                📤 CSV出力
+              </button>
               <span className="text-[11px] text-[var(--fg-muted)] leading-snug">
                 市場から受領したExcel/CSV/PDFの<strong>売り金額・手数料</strong>を、
                 出品番号または商品番号で一致する行に反映します。
