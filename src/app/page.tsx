@@ -215,6 +215,7 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const ACTIVE_SHEET_KEY = "ichiba-uri-active-sheet-id";
+  const lastSavedRef = useRef<string>("");
 
   // シート一覧を取得
   const loadSheetList = async () => {
@@ -243,7 +244,13 @@ export default function Home() {
       setFileName(data.sheet.name);
       setSavedAt(new Date(data.sheet.updated_at).toLocaleString("ja-JP"));
       const loadedRows: RowData[] = (data.rows || []).map(dbToRow);
-      setRows(loadedRows.length > 0 ? loadedRows : [emptyRow()]);
+      const finalRows = loadedRows.length > 0 ? loadedRows : [emptyRow()];
+      setRows(finalRows);
+      // 読み込み直後のスナップショットを記録（不要な自動保存を防ぐ）
+      const dbRows = finalRows
+        .filter(r => r.itemNumber || r.brand || r.itemName)
+        .map(rowToDb);
+      lastSavedRef.current = JSON.stringify({ name: data.sheet.name, rows: dbRows });
       localStorage.setItem(ACTIVE_SHEET_KEY, id);
     } catch (e) {
       console.error("loadSheet error:", e);
@@ -320,21 +327,26 @@ export default function Home() {
     return settings.buyerMap[code] || code;
   };
 
-  // 自動保存 (3秒デバウンス、シートが存在する場合のみ)
+  // 自動保存 (3秒デバウンス、変更がある場合のみ)
   useEffect(() => {
     if (!hydrated || !sheetId) return;
     const timer = setTimeout(async () => {
+      const dbRows = rows
+        .filter(r => r.itemNumber || r.brand || r.itemName)
+        .map(rowToDb);
+      const snapshot = JSON.stringify({ name: fileName, rows: dbRows });
+      // 前回保存時と同じなら送信しない
+      if (snapshot === lastSavedRef.current) return;
+
       setSaving(true);
       try {
-        const dbRows = rows
-          .filter(r => r.itemNumber || r.brand || r.itemName)
-          .map(rowToDb);
         const res = await fetch(`/api/sheets/${sheetId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: fileName, rows: dbRows }),
+          body: snapshot,
         });
         if (res.ok) {
+          lastSavedRef.current = snapshot;
           const now = new Date().toLocaleString("ja-JP");
           setSavedAt(now);
           // シート一覧の updated_at も更新

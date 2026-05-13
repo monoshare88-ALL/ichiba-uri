@@ -35,28 +35,51 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   }
 
   if (Array.isArray(body.rows)) {
-    const del = await supabase.from("ago_rows").delete().eq("sheet_id", id);
-    if (del.error) {
-      return NextResponse.json({ error: del.error.message }, { status: 500 });
+    const allowedFields = [
+      "item_number", "listing_number", "brand", "item_name", "accessories", "condition",
+      "reserve_price", "buyer", "purchase_price", "sale_price", "sale_amount", "fee",
+      "campaign", "lot_no", "box_no", "image_url", "front_image_url",
+      "kintone_title", "gemini_title", "sold_out", "tkb", "broken", "copy",
+    ];
+
+    // 既存行を取得して差分だけ更新
+    const existingRes = await supabase
+      .from("ago_rows")
+      .select("id, position")
+      .eq("sheet_id", id)
+      .order("position");
+    const existingRows = existingRes.data || [];
+
+    const toUpsert: Record<string, unknown>[] = [];
+    const reusableIds = existingRows.map(r => r.id);
+
+    for (let i = 0; i < body.rows.length; i++) {
+      const row = body.rows[i] as Record<string, unknown>;
+      const clean: Record<string, unknown> = { sheet_id: id, position: i };
+      // 既存行のIDを再利用（UPDATE扱い）、足りなければ新規INSERT
+      if (i < reusableIds.length) {
+        clean.id = reusableIds[i];
+      }
+      for (const key of allowedFields) {
+        if (key in row) clean[key] = row[key];
+      }
+      toUpsert.push(clean);
     }
 
-    if (body.rows.length > 0) {
-      const allowedFields = [
-        "item_number", "listing_number", "brand", "item_name", "accessories", "condition",
-        "reserve_price", "buyer", "purchase_price", "sale_price", "sale_amount", "fee",
-        "lot_no", "box_no", "image_url", "front_image_url",
-        "kintone_title", "gemini_title", "sold_out", "tkb", "broken", "copy",
-      ];
-      const toInsert = body.rows.map((row: Record<string, unknown>, i: number) => {
-        const clean: Record<string, unknown> = { sheet_id: id, position: i };
-        for (const key of allowedFields) {
-          if (key in row) clean[key] = row[key];
-        }
-        return clean;
-      });
-      const ins = await supabase.from("ago_rows").insert(toInsert);
-      if (ins.error) {
-        return NextResponse.json({ error: ins.error.message }, { status: 500 });
+    // 余分な既存行を削除（行数が減った場合）
+    if (existingRows.length > body.rows.length) {
+      const idsToDelete = reusableIds.slice(body.rows.length);
+      const del = await supabase.from("ago_rows").delete().in("id", idsToDelete);
+      if (del.error) {
+        return NextResponse.json({ error: del.error.message }, { status: 500 });
+      }
+    }
+
+    // UPSERT: 既存行はUPDATE、新規行はINSERT
+    if (toUpsert.length > 0) {
+      const ups = await supabase.from("ago_rows").upsert(toUpsert);
+      if (ups.error) {
+        return NextResponse.json({ error: ups.error.message }, { status: 500 });
       }
     }
 

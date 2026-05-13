@@ -79,6 +79,14 @@ function getSheetRange(sheet: XLSX.WorkSheet) {
   return XLSX.utils.decode_range(sheet["!ref"]);
 }
 
+/** ヘッダー文字列を正規化: 改行除去、全角英数→半角、全角記号→半角 */
+function normalizeHeader(s: string): string {
+  return s.trim()
+    .replace(/\r?\n/g, "")
+    .replace(/[\uff01-\uff5e]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/\u3000/g, " ");
+}
+
 function getAllHeaders(sheet: XLSX.WorkSheet) {
   const range = getSheetRange(sheet);
   if (!range) return { headerRow: 0, headers: {} as Record<number, string> };
@@ -86,7 +94,8 @@ function getAllHeaders(sheet: XLSX.WorkSheet) {
   let bestRow = 0;
   let bestCount = 0;
 
-  for (let r = range.s.r; r <= Math.min(range.s.r + 5, range.e.r); r++) {
+  const maxScan = Math.min(range.s.r + 10, range.e.r);
+  for (let r = range.s.r; r <= maxScan; r++) {
     let count = 0;
     for (let c = range.s.c; c <= range.e.c; c++) {
       const v = getCellVal(sheet, r, c);
@@ -101,31 +110,50 @@ function getAllHeaders(sheet: XLSX.WorkSheet) {
   const headers: Record<number, string> = {};
   for (let c = range.s.c; c <= range.e.c; c++) {
     const v = getCellVal(sheet, bestRow, c);
-    if (v != null) headers[c] = String(v).trim();
+    if (v != null) headers[c] = normalizeHeader(String(v));
   }
+
+  // 2行ヘッダー対応: bestRowの前後1行を調べて空セルを補完
+  for (const adjRow of [bestRow - 1, bestRow + 1]) {
+    if (adjRow < range.s.r || adjRow > maxScan) continue;
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      if (headers[c]) continue;
+      const v = getCellVal(sheet, adjRow, c);
+      if (v && typeof v === "string") {
+        headers[c] = normalizeHeader(String(v));
+      }
+    }
+  }
+
   return { headerRow: bestRow, headers };
 }
 
 function hasSellData(headers: Record<number, string>): boolean {
   const vals = Object.values(headers);
-  const kw = ["売り税抜", "売り税込", "売り金額", "成立金額", "セリ結果", "市場売り"];
-  return vals.some((h) => kw.some((k) => h.includes(k)));
+  const exactMatch = ["売り", "売", "金額", "利益", "粗利"];
+  const partialMatch = ["売り税", "売り金額", "成立金額", "セリ結果", "市場売り",
+    "金額(税", "金額+税", "売り計", "販売額", "販売金額", "売上金額", "売り価格",
+    "商談確定"];
+  return vals.some((h) =>
+    exactMatch.some((k) => h === k) || partialMatch.some((k) => h.includes(k))
+  );
 }
 
 function hasItemInfo(headers: Record<number, string>): boolean {
   const vals = Object.values(headers);
-  return vals.some((h) => h === "ブランド" || h.includes("ブランド名") || h.includes("品名"));
+  return vals.some((h) => h === "ブランド" || h.includes("ブランド名") || h.includes("品名") || h.includes("商品名") || h.includes("商品"));
 }
 
 function hasPurchaseData(headers: Record<number, string>): boolean {
   const vals = Object.values(headers);
-  return vals.some((h) => h === "買値" || h.includes("買値"));
+  return vals.some((h) => h === "買値" || h.includes("買値") || h.includes("仕入") || h.includes("金額"));
 }
 
 function extractRows(
   sheet: XLSX.WorkSheet,
   dateStr: string,
   sheetName: string,
+  opts?: { returnFee?: number },
 ): ProfitRow[] {
   const range = getSheetRange(sheet);
   if (!range) return [];
@@ -135,49 +163,82 @@ function extractRows(
 
   for (const [cStr, h] of Object.entries(headers)) {
     const c = Number(cStr);
+    // ブランド
     if (h === "ブランド" && col.brand == null) col.brand = c;
     else if ((h === "ブランド名" || h === "品名" || h === "モデル名") && col.item_name == null) col.item_name = c;
-    else if (h === "状態" && col.condition == null) col.condition = c;
+    // 商品名 (バッグ名、商品、商品名)
+    else if ((h === "商品名" || h === "商品" || h === "バッグ名" || h === "モデル/商品名") && col.item_name == null) col.item_name = c;
+    // 状態・ランク
+    else if ((h === "状態" || h === "ランク" || h === "ﾗﾝｸ") && col.condition == null) col.condition = c;
+    // 指値
     else if (h.includes("指値") && col.reserve == null) col.reserve = c;
-    else if (h === "バイヤー" && col.buyer == null) col.buyer = c;
-    else if (h === "バイヤー２" && col.buyer2 == null) col.buyer2 = c;
-    else if (h === "商品番号" && col.item_no == null) col.item_no = c;
-    else if ((h === "自社出品" || h === "自社") && col.listing_id == null) col.listing_id = c;
+    // バイヤー
+    else if ((h === "バイヤー" || h === "バイヤー名") && col.buyer == null) col.buyer = c;
+    else if ((h === "バイヤー２" || h === "バイヤー2" || h === "担当2" || h === "元のバイヤー") && col.buyer2 == null) col.buyer2 = c;
+    // 管理番号・商品番号
+    else if ((h === "商品番号" || h === "管理番号") && col.item_no == null) col.item_no = c;
+    // 出品番号
+    else if ((h === "自社出品" || h === "自社" || h === "出品番号" || h === "No." || h === "番号" || h === "札番") && col.listing_id == null) col.listing_id = c;
+    // 箱番・枝番 (listing_id候補)
+    else if ((h === "箱番" || h === "箱番枝番") && col.box == null) col.box = c;
+    else if ((h === "枝番") && col.branch == null) col.branch = c;
+    // 仕入 (様々な表記)
     else if (h === "買値" && col.purchase == null) col.purchase = c;
-    else if ((h === "買値税込み" || h === "買値 税込み") && col.purchase_tax == null) col.purchase_tax = c;
-    else if (h === "税込み" || h === "買値 税込み") {
-      // 「税込み」は文脈で判断: 買値の直後なら買値税込み、それ以外なら売り税込み
-      if (col.purchase != null && c === col.purchase + 1 && col.purchase_tax == null) col.purchase_tax = c;
+    else if ((h === "仕入れ" || h === "仕入" || h === "仕入れ金額" || h === "仕入れ税抜き" || h === "仕入金額(込)" || h === "仕入れ金額(税抜)" || h === "仕入れ(税抜)" || h === "仕入(税抜)" || h === "仕入れ(税抜き)" || h.startsWith("仕入") && !h.includes("税込")) && col.purchase == null) col.purchase = c;
+    else if (h === "金額" && col.purchase == null && col.sale_amount == null) col.purchase = c;
+    // 仕入税込
+    else if ((h === "買値税込み" || h === "買値 税込み" || h === "仕入れ税込み" || h === "仕入計" || h === "仕入+税" || h === "仕入税" || h === "仕入れ(税込)" || h === "仕入(税込)") && col.purchase_tax == null) col.purchase_tax = c;
+    else if ((h === "税込み修理代込み" || h.includes("税込") && h.includes("修理") || h === "税込み") && col.purchase_tax == null) {
+      // 「税込み」は文脈で判断: 仕入の近くなら仕入税込み
+      if (col.purchase != null && c <= col.purchase + 3) col.purchase_tax = c;
       else if (col.sale_amount != null && c > col.sale_amount && col.sale_tax == null) col.sale_tax = c;
+      else if (col.purchase != null) col.purchase_tax = c;
     }
+    // 売り (様々な表記)
     else if ((h === "売り税抜き" || h === "売り税抜") && col.sale_notax == null) col.sale_notax = c;
     else if ((h === "売り金額" || h.includes("売り金額")) && !h.includes("税込") && col.sale_amount == null) col.sale_amount = c;
     else if (h.includes("売り金額") && h.includes("税込") && col.sale_tax == null) col.sale_tax = c;
-    else if ((h === "売り税込み" || h === "売り税込" || h === "税込み売り") && col.sale_tax == null) {
-      if (col.purchase != null && c <= col.purchase + 2) {
-        if (col.purchase_tax == null) col.purchase_tax = c;
+    else if ((h === "売り" || h === "売") && col.sale_amount == null) col.sale_amount = c;
+    else if ((h === "売り税込み" || h === "売り税込" || h === "税込み売り" || h === "売税込み" || h === "売り計") && col.sale_tax == null) {
+      if (col.purchase != null && c <= col.purchase + 2 && col.purchase_tax == null) {
+        col.purchase_tax = c;
       } else {
         col.sale_tax = c;
       }
     }
     else if (h === "成立金額" && col.sale_amount == null) col.sale_amount = c;
     else if (h === "市場売り" && col.sale_amount == null) col.sale_amount = c;
-    else if (h.includes("セリ結果") && col.sale_amount == null) {
-      // セリ結果は金額の場合と参照番号(A-1)の場合がある → 最初のデータ行で判定
-      const testCell = sheet[XLSX.utils.encode_cell({ r: headerRow + 1, c })];
-      if (testCell && testCell.t === "n") col.sale_amount = c; // 数値なら売り金額
+    else if ((h === "金額(税抜)" || h === "最終売上金額" || h === "販売金額" || h === "売り価格" || h === "税抜き(商談確定)") && col.sale_amount == null) col.sale_amount = c;
+    else if ((h === "金額" || h === "売り結果") && col.purchase != null && c > col.purchase + 2 && col.sale_amount == null) col.sale_amount = c;
+    else if ((h === "金額(税込)" || h === "金額+税" || h === "売り税込み" || h === "売税込み" || h === "税込み(商談確定)") && col.sale_tax == null) col.sale_tax = c;
+    else if ((h.includes("セリ結果") || h === "結果") && col.sale_amount == null) {
+      // 最初の数行を確認して数値データがあれば売り金額列と判定
+      for (let tr = headerRow + 1; tr <= Math.min(headerRow + 5, range.e.r); tr++) {
+        const testCell = sheet[XLSX.utils.encode_cell({ r: tr, c })];
+        if (testCell && testCell.t === "n") { col.sale_amount = c; break; }
+      }
     }
-    else if ((h === "手数料" || h === "販売手数料") && !h.includes("税込") && col.fee == null) col.fee = c;
-    else if ((h.includes("手数料税込") || h.includes("手数料 税込")) && col.fee_tax == null) col.fee_tax = c;
+    // 手数料
+    else if ((h === "手数料" || h === "販売手数料" || h === "手数料(税抜)" || h === "撮影代金") && !h.includes("税込") && col.fee == null) col.fee = c;
+    else if ((h.includes("手数料税込") || h.includes("手数料 税込") || h === "手数料(税込)" || h === "手数料+税") && col.fee_tax == null) col.fee_tax = c;
+    // 販売額+手数料 (エコリング形式: 売り+手数料の合算)
+    else if (h === "販売額+手数料" && col.sale_plus_fee == null) col.sale_plus_fee = c;
+    // キャンペーン
     else if (h.includes("キャンペーン") && col.campaign == null) col.campaign = c;
+    // 返品
     else if (h === "返品" && col.return_flag == null) col.return_flag = c;
-    else if (h.includes("粗利") && col.gross == null) col.gross = c;
+    // 粗利・利益・売り(手数料引いた額)
+    else if ((h.includes("粗利") || h === "利益" || h.includes("利益") || h.includes("手数料引いた") || h.includes("手数料ひいた")) && col.gross == null) col.gross = c;
   }
 
   if (col.item_name == null && col.brand != null) col.item_name = col.brand + 1;
 
   const saleCol = col.sale_amount ?? col.sale_notax ?? undefined;
   const saleTaxCol = col.sale_tax ?? undefined;
+  const retFee = opts?.returnFee ?? 0;
+
+  // 箱番のマージセル対応
+  let lastBox = "";
 
   const rows: ProfitRow[] = [];
   for (let r = headerRow + 1; r <= range.e.r; r++) {
@@ -195,6 +256,18 @@ function extractRows(
 
     let saleAmount = saleCol != null ? safeNum(getCellVal(sheet, r, saleCol)) : 0;
     let saleTax = saleTaxCol != null ? safeNum(getCellVal(sheet, r, saleTaxCol)) : 0;
+
+    // エコリング形式: 販売額+手数料 の合算列がある場合
+    if (saleAmount === 0 && saleTax === 0 && col.sale_plus_fee != null) {
+      const combined = safeNum(getCellVal(sheet, r, col.sale_plus_fee));
+      if (combined > 0) {
+        // 手数料を差し引いた売り金額を算出
+        const feeVal = safeNum(getCellVal(sheet, r, col.fee ?? -1));
+        saleAmount = combined - feeVal;
+        saleTax = Math.round(saleAmount * 1.1);
+      }
+    }
+
     if (saleAmount > 0 && saleTax === 0) saleTax = Math.round(saleAmount * 1.1);
     if (saleAmount === 0 && saleTax > 0) saleAmount = Math.round(saleTax / 1.1);
 
@@ -204,7 +277,7 @@ function extractRows(
     const returnFlag = safeNum(getCellVal(sheet, r, col.return_flag ?? -1));
     const gross = safeNum(getCellVal(sheet, r, col.gross ?? -1));
 
-    const isReturned = returnFlag >= 500 || (saleAmount === 0 && purchase > 0);
+    const isReturned = returnFlag >= 500 || (saleAmount === 0 && (purchase > 0 || purchaseTax > 0));
 
     // 税込み値を確定: 直接取れればそれを使い、なければ税抜き×1.1
     const actualFeeTax = feeTax > 0 ? feeTax : (fee > 0 ? Math.round(fee * 1.1) : 0);
@@ -212,16 +285,26 @@ function extractRows(
     let profit = 0;
     let netSaleTaxIncl = 0;
     if (saleAmount > 0 && purchaseTax > 0) {
-      // 利益 = 売り金額税込み − 手数料税込み + キャンペーン×1.1 − 買値税込み
-      // (キャンペーン欄は税抜きで記載されている)
       netSaleTaxIncl = saleTax - actualFeeTax + Math.round(campaign * 1.1);
       profit = netSaleTaxIncl - purchaseTax;
     } else if (gross !== 0 && purchaseTax > 0) {
-      profit = gross - purchaseTax;
-      netSaleTaxIncl = gross;
+      // 粗利が直接ある場合はそれを使う (ただし税込みかどうか不明なので仕入税込みとの差分)
+      profit = gross;
+      netSaleTaxIncl = gross + purchaseTax;
     }
 
     const feeRate = saleAmount > 0 && actualFee > 0 ? Math.round((actualFee / saleAmount) * 1000) / 10 : 0;
+
+    // listing_id: 箱番+枝番 or 直接列
+    let listingId = String(getCellVal(sheet, r, col.listing_id ?? -1) || "");
+    if (!listingId && col.box != null) {
+      const boxVal = getCellVal(sheet, r, col.box);
+      if (boxVal) lastBox = String(boxVal);
+      const branchVal = col.branch != null ? getCellVal(sheet, r, col.branch) : null;
+      if (lastBox) {
+        listingId = branchVal ? `${lastBox}-${branchVal}` : lastBox;
+      }
+    }
 
     if (purchase > 0 || saleAmount > 0 || brand || itemName) {
       rows.push({
@@ -239,7 +322,7 @@ function extractRows(
           return b;
         })(),
         itemNo: String(getCellVal(sheet, r, col.item_no ?? -1) || ""),
-        listingId: String(getCellVal(sheet, r, col.listing_id ?? -1) || ""),
+        listingId,
         reserve: safeNum(getCellVal(sheet, r, col.reserve ?? -1)),
         purchase,
         purchaseTax,
@@ -253,7 +336,7 @@ function extractRows(
         saleTaxIncl: netSaleTaxIncl,
         profit,
         isReturned,
-        returnFee: isReturned ? 500 : 0,  // コメ兵: 引き手数料 ¥500/件
+        returnFee: isReturned ? retFee : 0,
       });
     }
   }
@@ -523,11 +606,12 @@ function buildSummary(allRows: ProfitRow[]) {
     }
   }
 
+  const hasCost = (r: ProfitRow) => r.purchase > 0 || r.purchaseTax > 0;
   const sold = unique.filter((r) => !r.isReturned && r.saleAmount > 0);
-  const profitRows = sold.filter((r) => r.purchase > 0);
+  const profitRows = sold.filter(hasCost);
   const returned = unique.filter((r) => r.isReturned);
   // 全商品 = 利益計算可能な商品 + 引き商品 (表示用)
-  const allDisplayRows = [...profitRows, ...returned.filter((r) => r.purchase > 0)];
+  const allDisplayRows = [...profitRows, ...returned.filter(hasCost)];
 
   // date summary
   const byDate: Record<string, { count: number; lossCount: number; returnedCount: number; purchase: number; sale: number; profit: number }> = {};
@@ -690,17 +774,341 @@ function buildSummary(allRows: ProfitRow[]) {
   };
 }
 
+// ------- 汎用日付抽出 -------
+function extractDateGeneric(filename: string): string | null {
+  // YYYYMMDD (例: 20260430, 20250315)
+  let m = filename.match(/(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/);
+  if (m) return m[1].slice(2) + m[2] + m[3];
+
+  // YY年M月D日 (例: 26年5月28日)
+  m = filename.match(/(\d{2})年(\d{1,2})月(\d{1,2})日/);
+  if (m) return m[1] + m[2].padStart(2, "0") + m[3].padStart(2, "0");
+
+  // YYMMDD (例: 260506, 250315) — 6桁連続
+  m = filename.match(/(?:^|[^\d])(\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?:[^\d]|$)/);
+  if (m) return m[1] + m[2] + m[3];
+
+  // MMDD (例: 0530, 1024) — 4桁で月日
+  m = filename.match(/(?:^|[^\d])(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?:[^\d-]|$)/);
+  if (m) return "__" + m[1] + m[2]; // 年不明 → "__MMDD"
+
+  // M.D形式 (例: 5.29, 10.30)
+  m = filename.match(/(?:^|[^\d])(\d{1,2})\.(\d{1,2})(?:[^\d]|$)/);
+  if (m) {
+    const mm = parseInt(m[1], 10);
+    const dd = parseInt(m[2], 10);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return "__" + String(mm).padStart(2, "0") + String(dd).padStart(2, "0");
+    }
+  }
+
+  // YYMM (例: 2605, 2411) — 4桁で月が有効な場合
+  m = filename.match(/(?:^|[^\d])(2[3-9]|[3-9]\d)(0[1-9]|1[0-2])(?:[^\d]|$)/);
+  if (m) return m[1] + m[2] + "01";
+
+  // N月 (例: 5月, 12月) — 月のみ
+  m = filename.match(/(\d{1,2})月/);
+  if (m) {
+    const mm = parseInt(m[1], 10);
+    if (mm >= 1 && mm <= 12) return "__" + String(mm).padStart(2, "0") + "01";
+  }
+
+  return null;
+}
+
+/** ファイルの更新日から年(YY)を補完 */
+function fixDateYear(dateStr: string, filepath: string): string {
+  if (!dateStr.startsWith("__")) return dateStr;
+  try {
+    const stat = fs.statSync(filepath);
+    const yy = String(stat.mtime.getFullYear()).slice(2);
+    return yy + dateStr.slice(2);
+  } catch {
+    return "26" + dateStr.slice(2); // フォールバック
+  }
+}
+
+// ------- 汎用 rows collector -------
+interface GenericMarketDef {
+  id: string;
+  name: string;
+  baseDir: string;
+  /** ファイルフィルタ: trueのファイルだけ処理 */
+  fileFilter: (filename: string) => boolean;
+  /** 日付抽出 (デフォルト: extractDateGeneric) */
+  extractDate?: (filename: string) => string | null;
+  /** シートフィルタ (デフォルト: 全シート) */
+  sheetFilter?: (sheetName: string) => boolean;
+  /** 引き手数料/件 (デフォルト: 0) */
+  returnFee?: number;
+  /** サブフォルダも再帰的に検索 */
+  recursive?: boolean;
+}
+
+function listFiles(dir: string, recursive: boolean): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files: string[] = [];
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory() && recursive) {
+      files.push(...listFiles(full, true));
+    } else if (e.isFile()) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
+function collectGenericRows(def: GenericMarketDef): ProfitRow[] {
+  const allFiles = listFiles(def.baseDir, !!def.recursive);
+  const dateExtractor = def.extractDate || extractDateGeneric;
+  const sheetFilter = def.sheetFilter || (() => true);
+
+  // ファイルをフィルタ＆新しい順にソート (同じ日付のファイルは最新のみ)
+  const candidates = allFiles
+    .map(fp => ({ fp, name: path.basename(fp) }))
+    .filter(f => def.fileFilter(f.name))
+    .sort((a, b) => {
+      // 新しいファイルを優先
+      try {
+        return fs.statSync(b.fp).mtimeMs - fs.statSync(a.fp).mtimeMs;
+      } catch { return 0; }
+    });
+
+  const allRows: ProfitRow[] = [];
+  const seenDates = new Set<string>();
+
+  for (const { fp, name } of candidates) {
+    let dateStr = dateExtractor(name);
+    if (!dateStr) {
+      // 日付がファイル名から取れない場合、ファイル更新日を使用
+      try {
+        const stat = fs.statSync(fp);
+        const d = stat.mtime;
+        dateStr = String(d.getFullYear()).slice(2) +
+          String(d.getMonth() + 1).padStart(2, "0") +
+          String(d.getDate()).padStart(2, "0");
+      } catch { continue; }
+    }
+    // 年不明の場合、ファイル更新日で補完
+    dateStr = fixDateYear(dateStr, fp);
+    // 同じ日付のファイルは最新のみ（ソート済みなので最初に来たもの）
+    if (seenDates.has(dateStr)) continue;
+    seenDates.add(dateStr);
+
+    let wb: XLSX.WorkBook;
+    try {
+      const buf = fs.readFileSync(fp);
+      wb = XLSX.read(buf, { type: "buffer" });
+    } catch {
+      continue;
+    }
+
+    // 全シートを解析して売りシート/仕入シートを分類
+    const sheetData: { name: string; rows: ProfitRow[]; hasSell: boolean; hasPurchase: boolean }[] = [];
+    for (const sn of wb.SheetNames) {
+      if (!sheetFilter(sn)) continue;
+      const ws = wb.Sheets[sn];
+      const { headers } = getAllHeaders(ws);
+      const hs = hasSellData(headers);
+      const hp = hasPurchaseData(headers);
+      if (!hs && !hp) continue;
+      const rows = extractRows(ws, dateStr, sn, { returnFee: def.returnFee || 0 });
+      sheetData.push({ name: sn, rows, hasSell: hs, hasPurchase: hp });
+    }
+
+    // ジョインインデックスを構築 (仕入データのある行を商品番号でインデックス化)
+    const joinIndex: Record<string, ProfitRow> = {};
+    for (const sd of sheetData) {
+      for (const r of sd.rows) {
+        if (r.itemNo && r.purchaseTax > 0) joinIndex[r.itemNo] = r;
+      }
+    }
+
+    // 売りデータのある行を収集し、仕入が欠けていればジョインで補完
+    for (const sd of sheetData) {
+      for (const r of sd.rows) {
+        if (r.saleAmount > 0 && r.purchaseTax === 0 && r.itemNo && joinIndex[r.itemNo]) {
+          const src = joinIndex[r.itemNo];
+          r.purchase = r.purchase || src.purchase;
+          r.purchaseTax = r.purchaseTax || src.purchaseTax;
+          r.brand = r.brand || src.brand;
+          r.itemName = r.itemName || src.itemName;
+          r.condition = r.condition || src.condition;
+          r.buyer = r.buyer || src.buyer;
+          r.reserve = r.reserve || src.reserve;
+          // 利益を再計算
+          if (r.saleAmount > 0 && r.purchaseTax > 0) {
+            const actualFeeTax = r.feeTax > 0 ? r.feeTax : (r.fee > 0 ? Math.round(r.fee * 1.1) : 0);
+            r.saleTaxIncl = r.saleTax - actualFeeTax + Math.round(r.campaign * 1.1);
+            r.profit = r.saleTaxIncl - r.purchaseTax;
+          }
+        }
+        allRows.push(r);
+      }
+    }
+  }
+
+  return allRows;
+}
+
+// ------- 全市場定義 -------
+const AGO_BASE = "D:/JP Dropbox/バイヤー用/あご表";
+
+const isExcel = (f: string) => f.endsWith(".xlsx") || f.endsWith(".xlsm") || f.endsWith(".xls");
+const notTilde = (f: string) => !f.startsWith("~$");
+
+const GENERIC_MARKETS: GenericMarketDef[] = [
+  {
+    id: "jaa",
+    name: "JAA",
+    baseDir: `${AGO_BASE}/JAA`,
+    fileFilter: f => isExcel(f) && notTilde(f) && f.includes("社内用"),
+    // まとめ or Sheet1 のみ (元シートはjoinソースとして別途利用されるが、
+    // 汎用コレクターではシート内で完結するデータのみ取得)
+    returnFee: 0,
+  },
+  {
+    id: "oba",
+    name: "OBA",
+    baseDir: `${AGO_BASE}/OBA`,
+    fileFilter: f => isExcel(f) && notTilde(f) && (f.includes("仕入") || f.includes("社内用") || f.includes("OBA")),
+    returnFee: 0,
+  },
+  {
+    id: "monobank",
+    name: "ものばんく",
+    baseDir: `${AGO_BASE}/ものばんく`,
+    fileFilter: f => isExcel(f) && notTilde(f) && f.includes("社内用"),
+    sheetFilter: sn => !sn.includes("原本"),
+    returnFee: 0,
+  },
+  {
+    id: "ecoring",
+    name: "エコリング",
+    baseDir: `${AGO_BASE}/エコリング出品`,
+    fileFilter: f => isExcel(f) && notTilde(f) && f.includes("エコリング"),
+    returnFee: 0,
+  },
+  {
+    id: "timeless",
+    name: "タイムレス",
+    baseDir: `${AGO_BASE}/タイムレスオークション`,
+    fileFilter: f => isExcel(f) && notTilde(f) && f.includes("社内用"),
+    recursive: true,
+    returnFee: 0,
+  },
+  {
+    id: "namara",
+    name: "なまら",
+    baseDir: `${AGO_BASE}/その他市場/なまら`,
+    fileFilter: f => isExcel(f) && notTilde(f) && f.includes("社内用"),
+    returnFee: 0,
+  },
+  {
+    id: "toyohashi",
+    name: "豊橋競市",
+    baseDir: `${AGO_BASE}/豊橋競市`,
+    fileFilter: f => isExcel(f) && notTilde(f) && (f.includes("自社用") || f.includes("社内用") || f.includes("豊橋競市")),
+    recursive: true,
+    sheetFilter: sn => !sn.includes("原本") && !sn.includes("見本"),
+    returnFee: 0,
+  },
+  {
+    id: "prime",
+    name: "プライム",
+    baseDir: `${AGO_BASE}/プライム`,
+    fileFilter: f => isExcel(f) && notTilde(f) && f.includes("社内用"),
+    sheetFilter: sn => sn.includes("まとめ") || sn === "Sheet1",
+    returnFee: 0,
+  },
+  {
+    id: "bo_kanazawa",
+    name: "BO金沢",
+    baseDir: `${AGO_BASE}/BO金沢`,
+    fileFilter: f => isExcel(f) && notTilde(f) && (f.includes("仕入") || f.includes("JBA")),
+    returnFee: 0,
+  },
+  {
+    id: "apre",
+    name: "アプレ",
+    baseDir: `${AGO_BASE}/アプレ`,
+    fileFilter: f => (isExcel(f)) && notTilde(f) && f.includes("社内用"),
+    recursive: true,
+    sheetFilter: sn => sn.includes("入力") || sn === "Sheet1",
+    returnFee: 0,
+  },
+  {
+    id: "daikichi",
+    name: "大吉卸商談",
+    baseDir: `${AGO_BASE}/大吉卸商談`,
+    fileFilter: f => isExcel(f) && notTilde(f) && f.includes("商談") && !f.includes("手順"),
+    returnFee: 0,
+  },
+  {
+    id: "manekiya",
+    name: "まねきや",
+    baseDir: `${AGO_BASE}/まねきや`,
+    fileFilter: f => isExcel(f) && notTilde(f),
+    returnFee: 0,
+  },
+  {
+    id: "auc_net",
+    name: "オークネット",
+    baseDir: `${AGO_BASE}/その他市場/オークネット`,
+    fileFilter: f => isExcel(f) && notTilde(f),
+    returnFee: 0,
+  },
+];
+
 // ------- market configs -------
-const MARKET_CONFIGS: Record<string, { baseDir: string; collector: (dir: string) => ProfitRow[] }> = {
-  komehyo: { baseDir: "D:/JP Dropbox/バイヤー用/あご表/コメ兵", collector: collectKomehyoRows },
-  taba:    { baseDir: "D:/JP Dropbox/バイヤー用/あご表/市場連盟", collector: collectTabaRows },
+const MARKET_CONFIGS: Record<string, { name: string; baseDir: string; collector: (dir: string) => ProfitRow[] }> = {
+  komehyo: { name: "コメ兵", baseDir: `${AGO_BASE}/コメ兵`, collector: collectKomehyoRows },
+  taba:    { name: "市場連盟", baseDir: `${AGO_BASE}/市場連盟`, collector: collectTabaRows },
 };
+
+// 汎用市場を登録
+for (const def of GENERIC_MARKETS) {
+  MARKET_CONFIGS[def.id] = {
+    name: def.name,
+    baseDir: def.baseDir,
+    collector: () => collectGenericRows(def),
+  };
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const market = searchParams.get("market") || "komehyo";
-  const config = MARKET_CONFIGS[market];
+  const market = searchParams.get("market") || "";
 
+  // 市場一覧を返す
+  if (market === "_list") {
+    const markets = Object.entries(MARKET_CONFIGS).map(([id, c]) => ({ id, name: c.name }));
+    return NextResponse.json({ markets });
+  }
+
+  // "all" → 全市場横断分析
+  if (market === "all") {
+    try {
+      const allRows: ProfitRow[] = [];
+      for (const [, config] of Object.entries(MARKET_CONFIGS)) {
+        try {
+          const rows = config.collector(config.baseDir);
+          allRows.push(...rows);
+        } catch (e) {
+          console.error(`[analysis] error in ${config.name}:`, e);
+        }
+      }
+      const data = buildSummary(allRows);
+      return NextResponse.json({ ...data, market: "all" });
+    } catch (e: unknown) {
+      console.error("[analysis] all error:", e);
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+  }
+
+  const config = MARKET_CONFIGS[market || "komehyo"];
   if (!config) {
     return NextResponse.json({ error: `Unknown market: ${market}` }, { status: 400 });
   }

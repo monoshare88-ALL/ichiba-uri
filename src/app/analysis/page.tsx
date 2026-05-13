@@ -111,12 +111,13 @@ const naturalCompare = (a: string, b: string): number => {
   return 0;
 };
 
-const MARKETS = [
+const DEFAULT_MARKETS = [
   { id: "komehyo", name: "コメ兵" },
   { id: "taba", name: "市場連盟" },
 ];
 
 export default function AnalysisPage() {
+  const [markets, setMarkets] = useState(DEFAULT_MARKETS);
   const [market, setMarket] = useState("komehyo");
   const [data, setData] = useState<AnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -153,6 +154,15 @@ export default function AnalysisPage() {
   };
 
   useEffect(() => {
+    // 市場一覧をAPIから取得
+    fetch("/api/analysis?market=_list")
+      .then(r => r.json())
+      .then(d => {
+        if (d.markets) {
+          setMarkets([{ id: "all", name: "全市場" }, ...d.markets]);
+        }
+      })
+      .catch(() => {});
     loadMarket("komehyo");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -221,21 +231,36 @@ export default function AnalysisPage() {
     return [...bases].sort();
   }, [data]);
 
-  const marketName = MARKETS.find((m) => m.id === market)?.name || market;
+  const marketName = markets.find((m) => m.id === market)?.name || market;
 
-  // 市場切替タブ (ローディング中・エラー時にも表示)
+  // 市場切替 (ドロップダウン + よく使う市場のクイックボタン)
   const marketTabs = (
-    <div className="flex gap-1.5">
-      {MARKETS.map((m) => (
-        <button
-          key={m.id}
-          onClick={() => loadMarket(m.id)}
-          disabled={loading}
-          className={`btn btn-sm ${market === m.id ? "btn-primary" : ""}`}
-        >
-          {m.name}
-        </button>
-      ))}
+    <div className="flex gap-1.5 items-center">
+      <select
+        value={market}
+        onChange={(e) => loadMarket(e.target.value)}
+        disabled={loading}
+        className="input text-sm font-bold py-1 px-2"
+        style={{ minWidth: 140 }}
+      >
+        {markets.map((m) => (
+          <option key={m.id} value={m.id}>{m.name}</option>
+        ))}
+      </select>
+      {["komehyo", "taba", "all"].map((id) => {
+        const m = markets.find((x) => x.id === id);
+        if (!m) return null;
+        return (
+          <button
+            key={id}
+            onClick={() => loadMarket(id)}
+            disabled={loading}
+            className={`btn btn-xs ${market === id ? "btn-primary" : ""}`}
+          >
+            {m.name}
+          </button>
+        );
+      })}
     </div>
   );
 
