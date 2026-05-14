@@ -173,7 +173,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center">
-        <div className="text-[var(--fg-muted)] text-sm">読込中…</div>
+        <div className="text-[var(--fg-muted)] text-[21px]">読込中…</div>
       </div>
     );
   }
@@ -181,40 +181,21 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
       {/* ===================== App Bar ===================== */}
-      <header className="sticky top-0 z-30 bg-[var(--bg)]/90 backdrop-blur-md border-b border-[var(--border)]">
-        <div className="max-w-[1600px] mx-auto px-4 md:px-6 h-14 flex items-center gap-4">
+      <header className="sticky top-0 z-30 border-b border-[#b0aab8] bg-[#f0edf5]">
+        <div className="max-w-[1600px] mx-auto px-3 md:px-4 h-10 flex items-center gap-3">
           <Link
             href="/"
-            className="btn btn-ghost btn-sm"
+            className="excel-btn"
             title="あご表に戻る"
           >
-            <span className="text-base leading-none">←</span>
-            <span className="text-xs">戻る</span>
+            ← 戻る
           </Link>
-          <div className="h-6 w-px bg-[var(--border)]" />
-          <div className="flex items-center gap-4">
-            <div
-              className="w-14 h-14 flex items-center justify-center text-[28px] font-black italic"
-              style={{
-                background: "var(--ink-cyan)",
-                border: "3px solid var(--fg)",
-                borderRadius: "18px",
-                boxShadow: "0 5px 0 var(--fg), inset 0 2px 0 rgba(255,255,255,0.6)",
-                color: "var(--fg)",
-                lineHeight: 1,
-                fontFamily: "var(--font-display)",
-              }}
-            >
-              ⚙
-            </div>
-            <div className="flex flex-col leading-none">
-              <h1 className="display text-[26px]">
-                設定
-              </h1>
-              <div className="mt-2">
-                <span className="ink-tag ink-tag-pink">GEAR MENU</span>
-              </div>
-            </div>
+          <div className="h-5 w-px bg-[#d5d0dc]" />
+          <div className="flex items-center gap-2">
+            <span className="text-[24px]">⚙</span>
+            <h1 className="text-[21px] font-bold tracking-tight" style={{ fontStyle: "normal" }}>
+              設定
+            </h1>
           </div>
         </div>
       </header>
@@ -225,10 +206,10 @@ export default function SettingsPage() {
           {/* ① 市場プロファイル */}
           <section className="panel p-6">
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[var(--accent)] text-xs font-bold tabular-nums">01</span>
-              <h2 className="text-base font-semibold tracking-tight">市場プロファイル</h2>
+              <span className="text-[var(--accent)] text-[18px]font-bold tabular-nums">01</span>
+              <h2 className="text-[24px] font-semibold tracking-tight">市場プロファイル</h2>
             </div>
-            <p className="text-xs text-[var(--fg-muted)] mb-4">
+            <p className="text-[18px] text-[var(--fg-muted)] mb-4">
               市場を選択すると、Excelインポート/エクスポートの列構成が自動で最適化されます。
             </p>
             <select
@@ -246,32 +227,32 @@ export default function SettingsPage() {
               if (!profile) return null;
               return (
                 <div className="mt-4 p-4 bg-[var(--bg-subtle)] border border-[var(--border)] rounded-xl">
-                  <p className="text-xs text-[var(--fg-muted)] mb-3">{profile.description}</p>
+                  <p className="text-[18px] text-[var(--fg-muted)] mb-3">{profile.description}</p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="p-3 bg-[var(--bg)] rounded-lg border border-[var(--border)]">
-                      <div className="text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-wide mb-1">社内用</div>
-                      <div className="text-sm font-medium">{profile.internalColumns.length}列</div>
-                      <div className="text-[10px] text-[var(--fg-subtle)] mt-1">
+                      <div className="text-[15px] font-semibold text-[var(--fg-muted)] uppercase tracking-wide mb-1">社内用</div>
+                      <div className="text-[21px] font-medium">{profile.internalColumns.length}列</div>
+                      <div className="text-[15px] text-[var(--fg-subtle)] mt-1">
                         {profile.internalColumns.filter(c => c.header).map(c => c.header).slice(0, 6).join(", ")}...
                       </div>
                     </div>
                     <div className="p-3 bg-[var(--bg)] rounded-lg border border-[var(--border)]">
-                      <div className="text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-wide mb-1">提出用</div>
-                      <div className="text-sm font-medium">{profile.submissionColumns.length}列</div>
-                      <div className="text-[10px] text-[var(--fg-subtle)] mt-1">
+                      <div className="text-[15px] font-semibold text-[var(--fg-muted)] uppercase tracking-wide mb-1">提出用</div>
+                      <div className="text-[21px] font-medium">{profile.submissionColumns.length}列</div>
+                      <div className="text-[15px] text-[var(--fg-subtle)] mt-1">
                         {profile.submissionColumns.map(c => c.header).join(", ")}
                       </div>
                     </div>
                     <div className="p-3 bg-[var(--bg)] rounded-lg border border-[var(--border)]">
-                      <div className="text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-wide mb-1">売上取込</div>
-                      <div className="text-sm font-medium">{profile.salesImport.columns.length}列</div>
-                      <div className="text-[10px] text-[var(--fg-subtle)] mt-1">
+                      <div className="text-[15px] font-semibold text-[var(--fg-muted)] uppercase tracking-wide mb-1">売上取込</div>
+                      <div className="text-[21px] font-medium">{profile.salesImport.columns.length}列</div>
+                      <div className="text-[15px] text-[var(--fg-subtle)] mt-1">
                         {profile.salesImport.columns.map(c => c.header).join(", ")}
                       </div>
                     </div>
                   </div>
                   {profile.import.skipSheetPatterns.length > 0 && (
-                    <p className="text-[10px] text-[var(--fg-subtle)] mt-3">
+                    <p className="text-[15px] text-[var(--fg-subtle)] mt-3">
                       インポート時にスキップするシート: {profile.import.skipSheetPatterns.map(p => `「${p}」`).join(", ")} を含むタブ
                     </p>
                   )}
@@ -283,10 +264,10 @@ export default function SettingsPage() {
           {/* ② 税率 */}
           <section className="panel p-6">
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[var(--accent)] text-xs font-bold tabular-nums">02</span>
-              <h2 className="text-base font-semibold tracking-tight">税率</h2>
+              <span className="text-[var(--accent)] text-[18px]font-bold tabular-nums">02</span>
+              <h2 className="text-[24px] font-semibold tracking-tight">税率</h2>
             </div>
-            <p className="text-xs text-[var(--fg-muted)] mb-4">
+            <p className="text-[18px] text-[var(--fg-muted)] mb-4">
               売上・手数料の計算に使う税率 (%) です。消費税率が変わったときに更新してください。
             </p>
             <div className="flex items-center gap-2 max-w-xs">
@@ -300,17 +281,17 @@ export default function SettingsPage() {
                 placeholder="10"
                 className="input"
               />
-              <span className="text-sm text-[var(--fg-muted)]">%</span>
+              <span className="text-[21px] text-[var(--fg-muted)]">%</span>
             </div>
           </section>
 
           {/* ③ バイヤー名マッピング */}
           <section className="panel p-6">
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[var(--accent)] text-xs font-bold tabular-nums">03</span>
-              <h2 className="text-base font-semibold tracking-tight">バイヤー名マッピング</h2>
+              <span className="text-[var(--accent)] text-[18px]font-bold tabular-nums">03</span>
+              <h2 className="text-[24px] font-semibold tracking-tight">バイヤー名マッピング</h2>
             </div>
-            <p className="text-xs text-[var(--fg-muted)] mb-4">
+            <p className="text-[18px] text-[var(--fg-muted)] mb-4">
               Kintoneから取得される「UU」「CC」などの<strong>バイヤーコード</strong>を、表示・Excel出力時に<strong>人名</strong>に変換します。
               例: <code className="text-[var(--accent)]">UU</code> → <code className="text-[var(--accent)]">坂巻</code>
             </p>
@@ -318,8 +299,8 @@ export default function SettingsPage() {
             {/* CSVインポート */}
             <div className="mb-5 p-4 bg-[var(--bg-subtle)] border border-[var(--border)] rounded-xl">
               <div className="flex flex-wrap items-center gap-3 mb-2">
-                <h3 className="text-xs font-semibold text-[var(--fg)]">CSVインポート</h3>
-                <label className="flex items-center gap-1.5 text-xs text-[var(--fg-muted)] cursor-pointer">
+                <h3 className="text-[18px] font-semibold text-[var(--fg)]">CSVインポート</h3>
+                <label className="flex items-center gap-1.5 text-[18px]text-[var(--fg-muted)] cursor-pointer">
                   <input
                     type="radio"
                     checked={importMode === "merge"}
@@ -328,7 +309,7 @@ export default function SettingsPage() {
                   />
                   追記マージ
                 </label>
-                <label className="flex items-center gap-1.5 text-xs text-[var(--fg-muted)] cursor-pointer">
+                <label className="flex items-center gap-1.5 text-[18px]text-[var(--fg-muted)] cursor-pointer">
                   <input
                     type="radio"
                     checked={importMode === "replace"}
@@ -338,7 +319,7 @@ export default function SettingsPage() {
                   全置換
                 </label>
               </div>
-              <p className="text-[11px] text-[var(--fg-subtle)] mb-3">
+              <p className="text-[17px] text-[var(--fg-subtle)] mb-3">
                 対応形式 (1行1ペア): <code>UU,坂巻</code> / <code>UU=坂巻</code> / <code>&quot;UU&quot;=&quot;坂巻&quot;</code> / タブ区切り / 全角カンマ。<code>#</code> 始まりの行はコメント。
               </p>
               <div className="flex flex-wrap items-center gap-2">
@@ -351,14 +332,14 @@ export default function SettingsPage() {
                     className="hidden"
                   />
                 </label>
-                <span className="text-[11px] text-[var(--fg-subtle)]">または下に貼り付け</span>
+                <span className="text-[17px] text-[var(--fg-subtle)]">または下に貼り付け</span>
               </div>
               <textarea
                 value={csvText}
                 onChange={e => setCsvText(e.target.value)}
                 placeholder={`UU,坂巻\nCC,高橋\nNN,谷中\n# コメント行は無視されます`}
                 rows={4}
-                className="input mt-2 font-mono text-xs"
+                className="input mt-2 font-mono text-[18px]"
               />
               <button
                 onClick={() => importCsv(csvText)}
@@ -370,11 +351,11 @@ export default function SettingsPage() {
             </div>
 
             <div className="overflow-hidden rounded-xl border border-[var(--border)]">
-              <table className="w-full text-sm">
+              <table className="w-full text-[21px]">
                 <thead className="bg-[var(--bg-subtle)] text-[var(--fg-muted)]">
                   <tr>
-                    <th className="px-3 py-2.5 text-left w-1/3 text-[11px] font-semibold uppercase tracking-wide">コード</th>
-                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide">人名</th>
+                    <th className="px-3 py-2.5 text-left w-1/3 text-[17px] font-semibold uppercase tracking-wide">コード</th>
+                    <th className="px-3 py-2.5 text-left text-[17px] font-semibold uppercase tracking-wide">人名</th>
                     <th className="px-3 py-2.5 w-12"></th>
                   </tr>
                 </thead>
@@ -431,7 +412,7 @@ export default function SettingsPage() {
             {saving ? "保存中…" : "設定を保存"}
           </button>
           {savedAt && (
-            <span className="text-xs text-[var(--success)] inline-flex items-center gap-1.5">
+            <span className="text-[18px] text-[var(--success)] inline-flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)]" />
               {savedAt} に保存しました
             </span>

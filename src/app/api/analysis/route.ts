@@ -1062,8 +1062,313 @@ const GENERIC_MARKETS: GenericMarketDef[] = [
   },
 ];
 
+// ------- 市場売り明細 (全市場横断の原本Excel) -------
+const MEISAI_BASE = "D:/JP Dropbox/バイヤー用/市場売り明細";
+
+/** XLSX日付シリアル値を YYMMDD 文字列に変換 */
+function xlsDateToYYMMDD(val: unknown): string {
+  if (!val) return "";
+  // Date オブジェクトの場合 (ExcelJS経由 etc)
+  if (val instanceof Date) {
+    const y = String(val.getFullYear()).slice(2);
+    const m = String(val.getMonth() + 1).padStart(2, "0");
+    const d = String(val.getDate()).padStart(2, "0");
+    return `${y}${m}${d}`;
+  }
+  // 数値 (Excelシリアル日付)
+  if (typeof val === "number" && val > 30000) {
+    const dt = XLSX.SSF.parse_date_code(val);
+    if (dt) {
+      const y = String(dt.y).slice(2);
+      const m = String(dt.m).padStart(2, "0");
+      const d = String(dt.d).padStart(2, "0");
+      return `${y}${m}${d}`;
+    }
+  }
+  // 文字列の場合
+  const s = String(val);
+  const match = s.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (match) {
+    const y = match[1].slice(2);
+    const m = match[2].padStart(2, "0");
+    const d = match[3].padStart(2, "0");
+    return `${y}${m}${d}`;
+  }
+  return "";
+}
+
+/** ヘッダー行から列インデックスを検出 */
+function findMeisaiColumns(sheet: XLSX.WorkSheet): {
+  format: "current" | "mid" | "old" | null;
+  buyerCol: number;
+  purchaseCol: number;
+  dateCol: number;
+  marketCol: number;
+  saleCol: number;
+  profitCol: number;
+  itemNoCol: number;
+  unsoldCol: number;
+} | null {
+  const range = getSheetRange(sheet);
+  if (!range) return null;
+
+  // ヘッダーセルを読む
+  const headers: Record<number, string> = {};
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const v = getCellVal(sheet, 0, c);
+    if (v) headers[c] = String(v);
+  }
+
+  const find = (keyword: string) => {
+    for (const [c, h] of Object.entries(headers)) {
+      if (h.includes(keyword)) return Number(c);
+    }
+    return -1;
+  };
+
+  // 現行形式 (2206~): バイヤー, 仕入れ（税抜き）, 仕入金額（込）, 販売日付, 販売市場名, 販売金額, 差し引き利益, 商品番号, 売れなかったら
+  if (find("バイヤー") === 0 && find("仕入金額") >= 0) {
+    return {
+      format: "current",
+      buyerCol: 0,
+      purchaseCol: find("仕入金額"),
+      dateCol: find("販売日付"),
+      marketCol: find("販売市場名"),
+      saleCol: find("販売金額"),
+      profitCol: find("差し引き"),
+      itemNoCol: find("商品番号"),
+      unsoldCol: find("売れなかったら"),
+    };
+  }
+
+  // 中間形式 (1906~2111): No., バイヤー, 仕入日付, 仕入金額, 販売日付, 販売市場名, 販売番号, 販売金額, 差し引き利益
+  if (find("No.") === 0 && find("バイヤー") >= 0) {
+    return {
+      format: "mid",
+      buyerCol: find("バイヤー"),
+      purchaseCol: find("仕入金額"),
+      dateCol: find("販売日付"),
+      marketCol: find("販売市場名"),
+      saleCol: find("販売金額"),
+      profitCol: find("差し引き"),
+      itemNoCol: find("販売番号"),
+      unsoldCol: -1,
+    };
+  }
+
+  // 旧形式 (~1811): No., 市場名, 仕入日付, 仕入金額, 仕入れ番号, 販売日付, 販売市場名, 販売番号, 販売金額, 販売期間, 差し引き利益
+  if (find("No.") === 0 && find("市場名") >= 0) {
+    return {
+      format: "old",
+      buyerCol: find("市場名"), // 旧形式ではバイヤーなし、市場名で代替
+      purchaseCol: find("仕入金額"),
+      dateCol: find("販売日付"),
+      marketCol: find("販売市場名"),
+      saleCol: find("販売金額"),
+      profitCol: find("差し引き"),
+      itemNoCol: find("販売番号"),
+      unsoldCol: -1,
+    };
+  }
+
+  return null;
+}
+
+/** ファイル名からカテゴリを判定 */
+function getMeisaiCategory(filename: string): string {
+  if (filename.includes("時計") || filename.includes("ジュエリー")) return "時計宝石";
+  if (filename.includes("道具")) return "道具";
+  return "バッグ";
+}
+
+/** 既知の日付入力ミスを補正 (元データは変更しない) */
+const MEISAI_DATE_FIXES: Record<string, { market?: string; corrected: string }> = {
+  "261210": { market: "エコリング", corrected: "251210" },
+};
+
+/** 今日の YYMMDD */
+function todayYYMMDD(): string {
+  const now = new Date();
+  const y = String(now.getFullYear()).slice(2);
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+}
+
+function collectMeisaiRows(): ProfitRow[] {
+  const rows: ProfitRow[] = [];
+  const today = todayYYMMDD();
+  const dirs = [MEISAI_BASE, path.join(MEISAI_BASE, "過去分")];
+
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    const files = fs.readdirSync(dir).filter(
+      f => (f.startsWith("市場売り明細") && (f.endsWith(".xlsm") || f.endsWith(".xlsx")) && !f.startsWith("~$"))
+    );
+
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      const category = getMeisaiCategory(file);
+      try {
+        const buf = fs.readFileSync(filePath);
+        const wb = XLSX.read(buf, { type: "buffer", cellDates: false });
+
+        // 明細シート
+        const meisaiSheet = wb.Sheets["明細"];
+        if (meisaiSheet) {
+          const cols = findMeisaiColumns(meisaiSheet);
+          if (cols) {
+            const range = getSheetRange(meisaiSheet)!;
+            for (let r = 1; r <= range.e.r; r++) {
+              const buyer = getCellVal(meisaiSheet, r, cols.buyerCol);
+              if (!buyer) continue;
+              const purchaseTax = safeNum(getCellVal(meisaiSheet, r, cols.purchaseCol));
+              const dateVal = getCellVal(meisaiSheet, r, cols.dateCol);
+              let dateStr = xlsDateToYYMMDD(dateVal);
+              if (!dateStr) continue;
+              // 日付が2016-2027の範囲外ならスキップ
+              const yyCheck = parseInt(dateStr.slice(0, 2), 10);
+              if (yyCheck < 16 || yyCheck > 27) continue;
+              const market = String(getCellVal(meisaiSheet, r, cols.marketCol) || "");
+              // 日付補正
+              const fix = MEISAI_DATE_FIXES[dateStr];
+              if (fix && (!fix.market || market === fix.market)) {
+                dateStr = fix.corrected;
+              }
+              const saleAmount = safeNum(getCellVal(meisaiSheet, r, cols.saleCol));
+              const rawProfit = safeNum(getCellVal(meisaiSheet, r, cols.profitCol));
+              const itemNo = cols.itemNoCol >= 0 ? String(getCellVal(meisaiSheet, r, cols.itemNoCol) || "") : "";
+              const unsold = cols.unsoldCol >= 0 ? getCellVal(meisaiSheet, r, cols.unsoldCol) : null;
+              const isUnsold = unsold === 1 || unsold === "1";
+              // 未来日付: まだ売れていないので利益0, 赤字扱いしない
+              const isFuture = dateStr > today;
+              const profit = isFuture ? 0 : Math.round(rawProfit);
+
+              rows.push({
+                date: dateStr,
+                source: market || "(不明)",
+                brand: category,
+                itemName: market,
+                condition: isUnsold ? "不落札" : (isFuture ? "未売上" : ""),
+                buyer: String(buyer),
+                itemNo,
+                listingId: "",
+                reserve: 0,
+                purchase: Math.round(purchaseTax / 1.1),
+                purchaseTax: Math.round(purchaseTax),
+                saleAmount: isFuture ? 0 : Math.round(saleAmount),
+                fee: 0,
+                feeTax: 0,
+                feeRate: 0,
+                campaign: 0,
+                campaignTax: 0,
+                saleTax: isFuture ? 0 : Math.round(saleAmount),
+                saleTaxIncl: isFuture ? 0 : Math.round(saleAmount),
+                profit,
+                isReturned: false,
+                returnFee: 0,
+              });
+            }
+          }
+        }
+
+        // 簡易明細シート — ヘッダー形式を自動判定
+        const kangiSheet = wb.Sheets["簡易明細"];
+        if (kangiSheet) {
+          const range = getSheetRange(kangiSheet);
+          if (range) {
+            // ヘッダー判定: col0が「バイヤー」→現行形式、「販売日付」→旧形式
+            const h0 = String(getCellVal(kangiSheet, 0, 0) || "");
+            const isCurrentFormat = h0.includes("バイヤー");
+            // 旧形式: 販売日付(0), 販売市場名(1), 仕入(2), 販売金額(3), 差し引き利益(4), バイヤー名(5), 備考(6)
+            // 現行:   バイヤー(0), 仕入税抜(1), 仕入込(2), 販売日付(3), 販売市場名(4), 販売金額(5), 差し引き利益(6), 備考(7)
+            // 旧形式のバイヤー列を探す（ファイルごとに微妙に違う）
+            let oldBuyerCol = -1;
+            if (!isCurrentFormat) {
+              for (let c = 0; c <= Math.min(range.e.c, 10); c++) {
+                const hv = String(getCellVal(kangiSheet, 0, c) || "");
+                if (hv.includes("バイヤー")) { oldBuyerCol = c; break; }
+              }
+            }
+
+            for (let r = 1; r <= range.e.r; r++) {
+              const firstCell = getCellVal(kangiSheet, r, 0);
+              if (firstCell == null) continue;
+
+              let buyer: string, purchaseTax: number, dateStr: string, market: string, saleAmount: number, profit: number, note: string;
+
+              if (isCurrentFormat) {
+                buyer = String(firstCell);
+                purchaseTax = safeNum(getCellVal(kangiSheet, r, 2));
+                dateStr = xlsDateToYYMMDD(getCellVal(kangiSheet, r, 3));
+                market = String(getCellVal(kangiSheet, r, 4) || "");
+                saleAmount = safeNum(getCellVal(kangiSheet, r, 5));
+                profit = safeNum(getCellVal(kangiSheet, r, 6));
+                note = String(getCellVal(kangiSheet, r, 7) || "");
+              } else {
+                // 旧形式
+                dateStr = xlsDateToYYMMDD(firstCell);
+                market = String(getCellVal(kangiSheet, r, 1) || "");
+                purchaseTax = safeNum(getCellVal(kangiSheet, r, 2));
+                saleAmount = safeNum(getCellVal(kangiSheet, r, 3));
+                profit = safeNum(getCellVal(kangiSheet, r, 4));
+                buyer = oldBuyerCol >= 0 ? String(getCellVal(kangiSheet, r, oldBuyerCol) || "(不明)") : "(不明)";
+                note = String(getCellVal(kangiSheet, r, oldBuyerCol >= 0 ? oldBuyerCol + 1 : 6) || "");
+              }
+
+              if (!dateStr) continue;
+              // 日付が2016-2027の範囲外ならスキップ
+              const yy = parseInt(dateStr.slice(0, 2), 10);
+              if (yy < 16 || yy > 27) continue;
+              // 日付補正
+              const fixK = MEISAI_DATE_FIXES[dateStr];
+              if (fixK && (!fixK.market || market === fixK.market)) {
+                dateStr = fixK.corrected;
+              }
+              // 未来日付: まだ売れていないので利益0
+              const isFutureK = dateStr > today;
+              const adjSale = isFutureK ? 0 : Math.round(saleAmount);
+              const adjProfit = isFutureK ? 0 : Math.round(profit);
+
+              rows.push({
+                date: dateStr,
+                source: market || "(不明)",
+                brand: category + "(まとめ)",
+                itemName: `${market} まとめ ${note}`.trim(),
+                condition: isFutureK ? "未売上(まとめ)" : "まとめ売り",
+                buyer,
+                itemNo: note,
+                listingId: "",
+                reserve: 0,
+                purchase: Math.round(purchaseTax / 1.1),
+                purchaseTax: Math.round(purchaseTax),
+                saleAmount: adjSale,
+                fee: 0,
+                feeTax: 0,
+                feeRate: 0,
+                campaign: 0,
+                campaignTax: 0,
+                saleTax: adjSale,
+                saleTaxIncl: adjSale,
+                profit: adjProfit,
+                isReturned: false,
+                returnFee: 0,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[meisai] Error reading ${file}:`, e instanceof Error ? e.message : e);
+      }
+    }
+  }
+
+  return rows;
+}
+
 // ------- market configs -------
 const MARKET_CONFIGS: Record<string, { name: string; baseDir: string; collector: (dir: string) => ProfitRow[] }> = {
+  meisai:  { name: "市場売り明細(原本)", baseDir: MEISAI_BASE, collector: collectMeisaiRows },
   komehyo: { name: "コメ兵", baseDir: `${AGO_BASE}/コメ兵`, collector: collectKomehyoRows },
   taba:    { name: "市場連盟", baseDir: `${AGO_BASE}/市場連盟`, collector: collectTabaRows },
 };

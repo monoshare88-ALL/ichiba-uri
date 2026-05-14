@@ -211,6 +211,7 @@ export default function Home() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyResults, setHistoryResults] = useState<HistoryResult[]>([]);
   const [settings, setSettings] = useState<AppSettings>({ market: "", buyerMap: {}, marketFormats: {}, taxRate: 10 });
+  const [marketList, setMarketList] = useState<{ id: string; name: string }[]>([]);
   const [activeTab, setActiveTab] = useState<"listing" | "sales">("listing");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -299,10 +300,32 @@ export default function Home() {
     }
   };
 
-  // 起動時: 設定 + シート一覧取得 → 前回開いていたシートを復元
+  // 市場一覧を取得
+  const loadMarketList = async () => {
+    try {
+      const res = await fetch("/api/analysis?market=_list");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.markets) setMarketList(data.markets);
+    } catch {}
+  };
+
+  // 市場を切り替え (設定に保存)
+  const changeMarket = async (newMarket: string) => {
+    setSettings(prev => ({ ...prev, market: newMarket }));
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ market: newMarket }),
+      });
+    } catch {}
+  };
+
+  // 起動時: 設定 + シート一覧 + 市場一覧取得 → 前回開いていたシートを復元
   useEffect(() => {
     (async () => {
-      await Promise.all([loadSettings(), loadSheetList()]);
+      await Promise.all([loadSettings(), loadSheetList(), loadMarketList()]);
       const lastId = localStorage.getItem(ACTIVE_SHEET_KEY);
       if (lastId) {
         await loadSheet(lastId);
@@ -1117,80 +1140,75 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
-      {/* ===================== App Bar ===================== */}
-      <header className="sticky top-0 z-30 bg-[var(--bg)]/90 backdrop-blur-md border-b border-[var(--border)]">
-        <div className="max-w-[1920px] mx-auto px-4 md:px-6 h-14 flex items-center gap-4">
-          <div className="flex items-center gap-4">
-            <div
-              className="w-14 h-14 flex items-center justify-center text-[28px] font-black italic"
-              style={{
-                background: "var(--ink-pink)",
-                border: "3px solid var(--fg)",
-                borderRadius: "18px",
-                boxShadow: "0 5px 0 var(--fg), inset 0 2px 0 rgba(255,255,255,0.6)",
-                color: "var(--fg)",
-                lineHeight: 1,
-                fontFamily: "var(--font-display)",
-              }}
-            >
+      {/* ===================== App Bar — Excel風メニューバー ===================== */}
+      <header className="sticky top-0 z-30 border-b border-[#b0aab8] bg-[#f0edf5]">
+        {/* タイトルバー */}
+        <div className="max-w-[1920px] mx-auto px-3 md:px-4 h-10 flex items-center gap-3 border-b border-[#d5d0dc]">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 flex items-center justify-center text-[21px] font-bold bg-[#4a7d4a] text-white rounded-sm">
               A
             </div>
-            <div className="flex flex-col leading-none">
-              <h1 className="display text-[26px]">
-                あご表作成
-              </h1>
-              <div className="mt-2">
-                <span className="ink-tag ink-tag-lime">v0.1</span>
-              </div>
-            </div>
+            <h1 className="text-[21px] font-bold tracking-tight" style={{ fontStyle: "normal" }}>
+              あご表作成
+            </h1>
+            <span className="text-[15px] text-[var(--fg-subtle)] ml-1">v0.1</span>
           </div>
 
-          <div className="hidden md:flex items-center gap-1 text-[11px] text-[var(--fg-subtle)]">
-            {settings.market && (
-              <span className="badge badge-accent">市場: {settings.market}</span>
-            )}
+          <div className="hidden md:flex items-center gap-2 text-[17px] text-[var(--fg-muted)]">
+            <label className="flex items-center gap-1">
+              <span className="text-[15px] font-semibold">市場:</span>
+              <select
+                value={settings.market}
+                onChange={e => changeMarket(e.target.value)}
+                className="px-2 py-0.5 text-[17px] font-semibold border border-[#b0c4de] rounded-sm bg-white focus:outline-none focus:border-[#4a7dff]"
+              >
+                <option value="">— 未選択 —</option>
+                {marketList.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </label>
             {Object.keys(settings.buyerMap).length > 0 && (
-              <span className="badge">バイヤー {Object.keys(settings.buyerMap).length}</span>
+              <span className="px-2 py-0.5 bg-[#e8e8e8] border border-[#c0c0c0] rounded-sm text-[17px] font-semibold">
+                バイヤー {Object.keys(settings.buyerMap).length}
+              </span>
             )}
           </div>
 
           <div className="ml-auto flex items-center gap-1.5">
-            {/* 履歴検索 */}
-            <div className="hidden md:flex items-center gap-1.5 pr-2 mr-1 border-r border-[var(--border)]">
+            <div className="hidden md:flex items-center gap-1 pr-2 mr-1 border-r border-[#d5d0dc]">
               <input
                 type="text"
                 value={historyQuery}
                 onChange={e => setHistoryQuery(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter") searchHistory(); }}
-                placeholder="🔍 商品番号で履歴検索"
-                className="input input-sm w-48"
+                placeholder="商品番号で履歴検索"
+                className="w-44 px-2 py-1 text-[18px] border border-[#b0aab8] rounded-sm bg-white focus:outline-none focus:border-[#4a7dff] focus:ring-1 focus:ring-[#4a7dff]"
                 inputMode="numeric"
               />
-              <button onClick={() => searchHistory()} className="btn btn-secondary btn-sm">
+              <button onClick={() => searchHistory()} className="excel-btn">
                 検索
               </button>
             </div>
-            <a href="/analysis" className="btn btn-ghost btn-sm" title="過去結果分析">
-              <span className="text-base leading-none">📊</span>
-              <span className="hidden sm:inline text-xs">分析</span>
+            <a href="/analysis" className="excel-btn" title="過去結果分析">
+              📊 分析
             </a>
-            <a href="/settings" className="btn btn-ghost btn-sm" title="設定">
-              <span className="text-base leading-none">⚙</span>
-              <span className="hidden sm:inline text-xs">設定</span>
+            <a href="/settings" className="excel-btn" title="設定">
+              ⚙ 設定
             </a>
           </div>
         </div>
 
-        {/* ===================== Toolbar ===================== */}
-        <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-3 border-t border-[var(--border)] bg-[var(--bg-subtle)]">
+        {/* ===================== Toolbar — Excel風リボン ===================== */}
+        <div className="max-w-[1920px] mx-auto px-3 md:px-4 py-1.5 bg-[#f8f6fa] border-b border-[#d5d0dc]">
           <div className="flex flex-wrap items-center gap-2">
             {/* シート選択 */}
-            <div className="flex items-center gap-1.5">
-              <label className="form-label mr-1">シート</label>
+            <div className="flex items-center gap-1">
+              <label className="text-[17px] font-semibold text-[var(--fg-muted)]">シート</label>
               <select
                 value={sheetId || ""}
                 onChange={e => { const v = e.target.value; if (v) loadSheet(v); }}
-                className="input input-sm max-w-[220px]"
+                className="px-2 py-1 text-[18px] border border-[#b0aab8] rounded-sm bg-white max-w-[360px] focus:outline-none focus:border-[#4a7dff]"
               >
                 <option value="">— 選択 —</option>
                 {sheetList.map(s => (
@@ -1199,10 +1217,10 @@ export default function Home() {
                   </option>
                 ))}
               </select>
-              <button onClick={() => createNewSheet()} className="btn btn-secondary btn-sm" title="新規シート作成">
+              <button onClick={() => createNewSheet()} className="excel-btn" title="新規シート作成">
                 ＋新規
               </button>
-              <label className="btn btn-secondary btn-sm cursor-pointer" title="過去のExcel(.xlsx)を取込んで新規シートとして登録">
+              <label className="excel-btn cursor-pointer" title="過去のExcel(.xlsx)を取込んで新規シートとして登録">
                 📂 取込
                 <input
                   type="file"
@@ -1213,40 +1231,40 @@ export default function Home() {
               </label>
             </div>
 
-            <div className="h-6 w-px bg-[var(--border)] mx-1" />
+            <div className="h-5 w-px bg-[#d5d0dc] mx-0.5" />
 
             {/* ファイル名 */}
-            <div className="flex items-center gap-1.5 flex-1 min-w-[220px] max-w-[360px]">
-              <label className="form-label">名称</label>
+            <div className="flex items-center gap-1 flex-1 min-w-[200px] max-w-[340px]">
+              <label className="text-[17px] font-semibold text-[var(--fg-muted)]">名称</label>
               <input
                 type="text"
                 value={fileName}
                 onChange={e => setFileName(e.target.value)}
                 placeholder="例: コメ260506あご表"
-                className="input input-sm flex-1"
+                className="flex-1 px-2 py-1 text-[18px] border border-[#b0aab8] rounded-sm bg-white focus:outline-none focus:border-[#4a7dff]"
               />
-              <span className="text-[10px] text-[var(--fg-subtle)]">.xlsx</span>
+              <span className="text-[15px] text-[var(--fg-subtle)]">.xlsx</span>
             </div>
 
-            <div className="h-6 w-px bg-[var(--border)] mx-1" />
+            <div className="h-5 w-px bg-[#d5d0dc] mx-0.5" />
 
-            <button onClick={saveNow} disabled={saving} className="btn btn-primary btn-sm">
-              {saving ? "保存中…" : "保存"}
+            <button onClick={saveNow} disabled={saving} className="excel-btn excel-btn-primary">
+              {saving ? "保存中…" : "💾 保存"}
             </button>
-            <button onClick={clearAll} className="btn btn-secondary btn-sm">
+            <button onClick={clearAll} className="excel-btn">
               行クリア
             </button>
             {sheetId && (
-              <button onClick={deleteSheet} className="btn btn-danger btn-sm" title="このシートを削除">
+              <button onClick={deleteSheet} className="excel-btn excel-btn-danger" title="このシートを削除">
                 削除
               </button>
             )}
 
             {/* 保存ステータス */}
-            <div className="ml-auto flex items-center gap-2 text-[11px] text-[var(--fg-subtle)]">
+            <div className="ml-auto flex items-center gap-2 text-[17px] text-[var(--fg-subtle)]">
               {!sheetId ? (
-                <span className="inline-flex items-center gap-1 text-[var(--warning)]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--warning)]" />
+                <span className="inline-flex items-center gap-1 text-[#c08000]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#c08000]" />
                   シート未選択
                 </span>
               ) : savedAt ? (
@@ -1264,21 +1282,29 @@ export default function Home() {
 
       {/* ===================== Main ===================== */}
       <main className="max-w-[1920px] mx-auto px-4 md:px-6 py-5 space-y-4">
-        {/* タブ切替 */}
-        <div className="flex items-center gap-2">
+        {/* タブ切替 — Excel風シートタブ */}
+        <div className="flex items-end gap-0">
           <button
             onClick={() => setActiveTab("listing")}
-            className={activeTab === "listing" ? "btn btn-primary" : "btn"}
+            className={`px-4 py-1.5 text-[20px] font-semibold border border-[#b0aab8] rounded-t-md transition-colors ${
+              activeTab === "listing"
+                ? "bg-white border-b-white -mb-px z-10 relative"
+                : "bg-[#e8e4f0] text-[var(--fg-muted)] hover:bg-[#f0edf5]"
+            }`}
           >
             出品
           </button>
           <button
             onClick={() => setActiveTab("sales")}
-            className={activeTab === "sales" ? "btn btn-primary" : "btn"}
+            className={`px-4 py-1.5 text-[20px] font-semibold border border-[#b0aab8] rounded-t-md transition-colors ${
+              activeTab === "sales"
+                ? "bg-white border-b-white -mb-px z-10 relative"
+                : "bg-[#e8e4f0] text-[var(--fg-muted)] hover:bg-[#f0edf5]"
+            }`}
           >
             売上入力
           </button>
-          <span className="ml-2 text-[11px] text-[var(--fg-subtle)]">
+          <span className="ml-3 pb-1.5 text-[17px] text-[var(--fg-subtle)]">
             {activeTab === "listing"
               ? "商品情報の出品登録"
               : `売上・手数料の入力 (${rows.filter(r => r.itemNumber).length} 件)`}
@@ -1287,133 +1313,133 @@ export default function Home() {
 
         {activeTab === "listing" && (
         <>
-        {/* 入力エリア */}
-        <section className="panel p-4 space-y-3">
+        {/* 入力エリア — Excel風ツールバー */}
+        <section className="bg-[#f8f6fa] border border-[#b0aab8] rounded-sm p-3 space-y-2">
           <div className="flex flex-wrap gap-2 items-center">
-            <form onSubmit={handleManualSubmit} className="flex gap-2 flex-1 min-w-[320px]">
+            <form onSubmit={handleManualSubmit} className="flex gap-1.5 flex-1 min-w-[300px]">
               <input
                 ref={inputRef}
                 type="text"
                 value={manualInput}
                 onChange={e => setManualInput(e.target.value)}
                 placeholder="商品番号を入力 (例: 36511050)"
-                className="input flex-1"
+                className="flex-1 px-3 py-1.5 text-[21px] font-semibold border border-[#b0aab8] rounded-sm bg-white focus:outline-none focus:border-[#4a7dff] focus:ring-1 focus:ring-[#4a7dff]"
                 inputMode="numeric"
               />
-              <button type="submit" className="btn btn-primary">追加</button>
+              <button type="submit" className="excel-btn excel-btn-primary">追加</button>
             </form>
-            <button onClick={() => setScannerOpen(true)} className="btn btn-secondary">
+            <button onClick={() => setScannerOpen(true)} className="excel-btn">
               📷 バーコード
             </button>
-            <button onClick={addRow} className="btn btn-secondary">＋行追加</button>
-            <div className="h-8 w-px bg-[var(--border)] mx-1" />
-            <button onClick={() => exportExcel("internal")} className="btn btn-secondary" title="社内用形式でExcel出力">
+            <button onClick={addRow} className="excel-btn">＋行追加</button>
+            <div className="h-5 w-px bg-[#d5d0dc] mx-0.5" />
+            <button onClick={() => exportExcel("internal")} className="excel-btn" title="社内用形式でExcel出力">
               📊 社内用
             </button>
-            <button onClick={() => exportExcel("submission")} className="btn btn-primary" title="提出用 (あご表) 形式でExcel出力">
+            <button onClick={() => exportExcel("submission")} className="excel-btn excel-btn-primary" title="提出用 (あご表) 形式でExcel出力">
               📤 提出用
             </button>
           </div>
 
           {/* 箱番・出品番号 一括付与 */}
-          <div className="flex flex-wrap gap-3 items-center pt-3 border-t border-[var(--border)]">
+          <div className="flex flex-wrap gap-3 items-center pt-2 border-t border-[#d5d0dc]">
             <div className="flex items-center gap-1.5">
-              <span className="form-label">箱番・出品番号一括</span>
-              <span className="text-[10px] text-[var(--fg-subtle)]">商品番号ありの全行に付与</span>
+              <span className="text-[17px] font-bold text-[var(--fg-muted)]">箱番・出品番号一括</span>
+              <span className="text-[15px] text-[var(--fg-subtle)]">商品番号ありの全行に付与</span>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-[var(--fg-muted)]">開始箱番</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[17px] text-[var(--fg-muted)]">開始箱番</span>
               <input
                 type="text"
                 value={bulkStartBox}
                 onChange={e => setBulkStartBox(e.target.value)}
                 placeholder="例: A01"
-                className="input input-sm w-24"
+                className="w-20 px-2 py-1 text-[18px] border border-[#b0aab8] rounded-sm bg-white focus:outline-none focus:border-[#4a7dff]"
               />
             </div>
 
             <div className="flex items-center gap-1.5">
-              <span className="text-xs text-[var(--fg-muted)]">モード</span>
-              <label className="flex items-center gap-1 text-xs cursor-pointer">
+              <span className="text-[17px] text-[var(--fg-muted)]">モード</span>
+              <label className="flex items-center gap-1 text-[17px] cursor-pointer">
                 <input
                   type="radio"
                   checked={bulkNumberingMode === "box10"}
                   onChange={() => setBulkNumberingMode("box10")}
-                  className="accent-[var(--accent)]"
+                  className="accent-[#4a7dff]"
                 />
                 箱ごと(1-10)
               </label>
-              <label className="flex items-center gap-1 text-xs cursor-pointer">
+              <label className="flex items-center gap-1 text-[17px] cursor-pointer">
                 <input
                   type="radio"
                   checked={bulkNumberingMode === "serial"}
                   onChange={() => setBulkNumberingMode("serial")}
-                  className="accent-[var(--accent)]"
+                  className="accent-[#4a7dff]"
                 />
                 通し番号
               </label>
             </div>
 
             {(bulkNumberingMode === "serial" || !bulkStartBox.trim()) && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-[var(--fg-muted)]">開始</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[17px] text-[var(--fg-muted)]">開始</span>
                 <input
                   type="number"
                   min={1}
                   value={bulkStartNo}
                   onChange={e => setBulkStartNo(e.target.value)}
-                  className="input input-sm w-16"
+                  className="w-14 px-2 py-1 text-[18px] border border-[#b0aab8] rounded-sm bg-white focus:outline-none focus:border-[#4a7dff]"
                 />
               </div>
             )}
 
-            <button onClick={applyBulkNumbering} className="btn btn-secondary btn-sm">
+            <button onClick={applyBulkNumbering} className="excel-btn">
               一括付与
             </button>
 
             {!bulkStartBox.trim() && bulkNumberingMode === "box10" && (
-              <span className="text-[10px] text-[var(--warning)]">
+              <span className="text-[15px] text-[#c08000]">
                 ※ 開始箱番が未入力のため通し番号モードで実行されます
               </span>
             )}
           </div>
 
           {/* 指値一括操作 */}
-          <div className="flex flex-wrap gap-4 items-center pt-3 border-t border-[var(--border)]">
+          <div className="flex flex-wrap gap-3 items-center pt-2 border-t border-[#d5d0dc]">
             <div className="flex items-center gap-1.5">
-              <span className="form-label">指値一括</span>
-              <span className="text-[10px] text-[var(--fg-subtle)]">🔒未チェック行のみ</span>
+              <span className="text-[17px] font-bold text-[var(--fg-muted)]">指値一括</span>
+              <span className="text-[15px] text-[var(--fg-subtle)]">🔒未チェック行のみ</span>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-[var(--fg-muted)]">仕入価格 ×</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[17px] text-[var(--fg-muted)]">仕入価格 ×</span>
               <input
                 type="number"
                 step="0.1"
                 value={multiplier}
                 onChange={e => setMultiplier(e.target.value)}
-                className="input input-sm w-16"
+                className="w-14 px-2 py-1 text-[18px] border border-[#b0aab8] rounded-sm bg-white focus:outline-none focus:border-[#4a7dff]"
               />
-              <span className="text-xs text-[var(--fg-muted)]">倍 (千円単位)</span>
-              <button onClick={applyMultiplier} className="btn btn-secondary btn-sm">
+              <span className="text-[17px] text-[var(--fg-muted)]">倍 (千円単位)</span>
+              <button onClick={applyMultiplier} className="excel-btn">
                 計算
               </button>
             </div>
 
-            <div className="h-5 w-px bg-[var(--border)]" />
+            <div className="h-4 w-px bg-[#d5d0dc]" />
 
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-[var(--fg-muted)]">一律</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[17px] text-[var(--fg-muted)]">一律</span>
               <input
                 type="number"
                 value={bulkPrice}
                 onChange={e => setBulkPrice(e.target.value)}
                 placeholder="50000"
-                className="input input-sm w-24"
+                className="w-20 px-2 py-1 text-[18px] border border-[#b0aab8] rounded-sm bg-white focus:outline-none focus:border-[#4a7dff]"
               />
-              <span className="text-xs text-[var(--fg-muted)]">円</span>
-              <button onClick={applyBulkPrice} className="btn btn-secondary btn-sm">
+              <span className="text-[17px] text-[var(--fg-muted)]">円</span>
+              <button onClick={applyBulkPrice} className="excel-btn">
                 設定
               </button>
             </div>
@@ -1427,9 +1453,9 @@ export default function Home() {
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-16 overflow-y-auto">
             <div className="panel max-w-5xl w-full p-5 shadow-xl">
               <div className="flex justify-between items-center mb-3">
-                <h2 className="text-lg font-semibold tracking-tight">
+                <h2 className="text-[27px] font-semibold tracking-tight">
                   履歴検索
-                  <span className="ml-2 text-sm font-normal text-[var(--fg-muted)]">
+                  <span className="ml-2 text-[21px] font-normal text-[var(--fg-muted)]">
                     商品番号「{historyQuery}」
                     {!historyLoading && <span className="ml-1.5 text-[var(--fg-subtle)]">({historyResults.length} 件)</span>}
                   </span>
@@ -1439,12 +1465,12 @@ export default function Home() {
                 </button>
               </div>
               {historyLoading ? (
-                <div className="text-[var(--fg-muted)] py-8 text-center text-sm">読込中…</div>
+                <div className="text-[var(--fg-muted)] py-8 text-center text-[21px]">読込中…</div>
               ) : historyResults.length === 0 ? (
-                <div className="text-[var(--fg-muted)] py-8 text-center text-sm">該当データなし</div>
+                <div className="text-[var(--fg-muted)] py-8 text-center text-[21px]">該当データなし</div>
               ) : (
                 <div className="overflow-x-auto max-h-[60vh] overflow-y-auto rounded-lg border border-[var(--border)]">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-[18px]">
                     <thead className="bg-[var(--bg-subtle)] sticky top-0 z-10">
                       <tr className="text-[var(--fg-muted)]">
                         <th className="px-3 py-2 text-left font-semibold">シート</th>
@@ -1500,7 +1526,7 @@ export default function Home() {
                   </table>
                 </div>
               )}
-              <p className="text-[11px] text-[var(--fg-subtle)] mt-3">
+              <p className="text-[17px] text-[var(--fg-subtle)] mt-3">
                 ※ 過去のあご表シートに同じ商品番号がある場合、同一商品の過去の売価・指値・状態を確認できます。
               </p>
             </div>
@@ -1512,7 +1538,7 @@ export default function Home() {
           <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="panel max-w-2xl w-full p-5 shadow-xl">
               <div className="flex justify-between items-center mb-3">
-                <h2 className="text-lg font-semibold tracking-tight">バーコード読取</h2>
+                <h2 className="text-[27px] font-semibold tracking-tight">バーコード読取</h2>
                 <button onClick={() => setScannerOpen(false)} className="btn btn-ghost btn-sm">
                   閉じる
                 </button>
@@ -1525,29 +1551,29 @@ export default function Home() {
         {activeTab === "listing" && (
         <>
         {/* ===================== テーブル ===================== */}
-        <section className="panel overflow-hidden">
+        <section className="panel overflow-hidden !rounded-md !border-[1px] !border-[#b0aab8] !shadow-none">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[var(--bg-subtle)] border-b border-[var(--border)]">
-                <tr className="text-[var(--fg-muted)]">
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">箱番</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">出品番号</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">代表</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">正面</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">商品番号</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">ロット</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">ブランド</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">バッグ名</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">付属品</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">状態</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">
-                    指値 <span className="text-[9px] font-normal normal-case" title="🔒 = 一括操作対象外">🔒</span>
+            <table className="w-full text-[21px] border-collapse">
+              <thead>
+                <tr>
+                  <th className="text-left">箱番</th>
+                  <th className="text-left">出品番号</th>
+                  <th className="text-left">代表</th>
+                  <th className="text-left">正面</th>
+                  <th className="text-left">商品番号</th>
+                  <th className="text-left">ロット</th>
+                  <th className="text-left">ブランド</th>
+                  <th className="text-left">バッグ名</th>
+                  <th className="text-left">付属品</th>
+                  <th className="text-left">状態</th>
+                  <th className="text-left">
+                    指値 <span className="text-[14px] font-normal" title="🔒 = 一括操作対象外">🔒</span>
                   </th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">バイヤー</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">仕入</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">販売</th>
-                  <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">AIタイトル</th>
-                  <th className="px-2 py-3"></th>
+                  <th className="text-left">バイヤー</th>
+                  <th className="text-left">仕入</th>
+                  <th className="text-left">販売</th>
+                  <th className="text-left">AIタイトル</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -1579,7 +1605,7 @@ export default function Home() {
                           />
                         </a>
                       ) : (
-                        <div className="w-20 h-20 bg-[var(--bg-muted)] rounded-lg flex items-center justify-center text-[10px] text-[var(--fg-subtle)]">
+                        <div className="w-20 h-20 bg-[var(--bg-muted)] rounded-lg flex items-center justify-center text-[15px] text-[var(--fg-subtle)]">
                           no image
                         </div>
                       )}
@@ -1596,7 +1622,7 @@ export default function Home() {
                           />
                         </a>
                       ) : (
-                        <div className="w-20 h-20 bg-[var(--bg-muted)] rounded-lg flex items-center justify-center text-[10px] text-[var(--fg-subtle)]">
+                        <div className="w-20 h-20 bg-[var(--bg-muted)] rounded-lg flex items-center justify-center text-[15px] text-[var(--fg-subtle)]">
                           no image
                         </div>
                       )}
@@ -1613,8 +1639,8 @@ export default function Home() {
                         }}
                         className="input input-sm w-24 tabular-nums"
                       />
-                      {row.status === "loading" && <div className="mt-1 text-[10px] text-[var(--accent)]">読込中…</div>}
-                      {row.status === "error" && <div className="mt-1 text-[10px] text-[var(--fg-muted)]">{row.errorMsg}</div>}
+                      {row.status === "loading" && <div className="mt-1 text-[15px] text-[var(--accent)]">読込中…</div>}
+                      {row.status === "error" && <div className="mt-1 text-[15px] text-[var(--fg-muted)]">{row.errorMsg}</div>}
                     </td>
                     <td className="px-3 py-2 align-top">
                       <textarea rows={2} value={row.lotNo}
@@ -1629,7 +1655,7 @@ export default function Home() {
                     <td className="px-3 py-2 align-top">
                       <textarea rows={2} value={row.itemName}
                         onChange={e => updateRow(row.id, { itemName: e.target.value })}
-                        className="input input-sm w-56 resize-y leading-snug" />
+                        className="cell-input cell-title w-56 resize-y leading-snug" />
                     </td>
                     <td className="px-3 py-2 align-top">
                       <textarea rows={2} value={row.accessories}
@@ -1652,7 +1678,7 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => updateRow(row.id, { soldOut: !row.soldOut })}
-                          className={`px-1.5 py-0.5 text-[10px] rounded-md font-medium transition-colors ${
+                          className={`px-1.5 py-0.5 text-[15px] rounded-md font-medium transition-colors ${
                             row.soldOut
                               ? "bg-[var(--danger)] text-white"
                               : "bg-[var(--bg-muted)] text-[var(--fg-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
@@ -1664,7 +1690,7 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => updateRow(row.id, { tkb: !row.tkb })}
-                          className={`px-1.5 py-0.5 text-[10px] rounded-md font-medium transition-colors ${
+                          className={`px-1.5 py-0.5 text-[15px] rounded-md font-medium transition-colors ${
                             row.tkb
                               ? "bg-[var(--warning)] text-white"
                               : "bg-[var(--bg-muted)] text-[var(--fg-muted)] hover:bg-[var(--warning-soft)] hover:text-[var(--warning)]"
@@ -1676,7 +1702,7 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => updateRow(row.id, { broken: !row.broken })}
-                          className={`px-1.5 py-0.5 text-[10px] rounded-md font-medium transition-colors ${
+                          className={`px-1.5 py-0.5 text-[15px] rounded-md font-medium transition-colors ${
                             row.broken
                               ? "bg-[var(--warning)] text-white"
                               : "bg-[var(--bg-muted)] text-[var(--fg-muted)] hover:bg-[var(--warning-soft)] hover:text-[var(--warning)]"
@@ -1688,7 +1714,7 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => updateRow(row.id, { copy: !row.copy })}
-                          className={`px-1.5 py-0.5 text-[10px] rounded-md font-medium transition-colors ${
+                          className={`px-1.5 py-0.5 text-[15px] rounded-md font-medium transition-colors ${
                             row.copy
                               ? "bg-[var(--accent)] text-white"
                               : "bg-[var(--bg-muted)] text-[var(--fg-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
@@ -1703,8 +1729,8 @@ export default function Home() {
                       <div className="flex items-center gap-1.5">
                         <input type="text" value={row.reservePrice}
                           onChange={e => updateRow(row.id, { reservePrice: e.target.value })}
-                          className={`input input-sm w-20 tabular-nums ${
-                            row.priceLocked ? "!border-[var(--warning)] !bg-[var(--warning-soft)]" : ""
+                          className={`cell-input cell-amount w-24 ${
+                            row.priceLocked ? "!bg-[var(--warning-soft)]" : ""
                           }`} />
                         <input
                           type="checkbox"
@@ -1718,19 +1744,19 @@ export default function Home() {
                     <td className="px-3 py-2 align-top">
                       <input type="text" value={row.buyer}
                         onChange={e => updateRow(row.id, { buyer: e.target.value })}
-                        className="input input-sm w-20" />
+                        className="cell-input cell-buyer w-24" />
                     </td>
                     <td className="px-3 py-2 align-top">
                       <input type="text" value={row.purchasePrice}
                         onChange={e => updateRow(row.id, { purchasePrice: e.target.value })}
-                        className="input input-sm w-20 tabular-nums" />
+                        className="cell-input cell-amount w-24" />
                     </td>
                     <td className="px-3 py-2 align-top">
                       <input type="text" value={row.salePrice}
                         onChange={e => updateRow(row.id, { salePrice: e.target.value })}
-                        className="input input-sm w-20 tabular-nums" />
+                        className="cell-input cell-amount w-24" />
                     </td>
-                    <td className="px-3 py-2 text-xs align-top" style={{ minWidth: 260, maxWidth: 360 }}>
+                    <td className="px-3 py-2 text-[18px] align-top" style={{ minWidth: 260, maxWidth: 360 }}>
                       {row.geminiTitle && (
                         <div className="mb-1.5 flex items-start gap-1.5">
                           <span className="badge badge-success shrink-0">G</span>
@@ -1778,7 +1804,7 @@ export default function Home() {
           </div>
         </section>
 
-        <div className="flex items-center justify-between text-[11px] text-[var(--fg-subtle)] px-1">
+        <div className="flex items-center justify-between text-[17px] text-[var(--fg-subtle)] px-1">
           <span>合計 <span className="font-semibold text-[var(--fg-muted)]">{rows.filter(r => r.itemNumber).length}</span> 件</span>
           <span>Supabase同期・3秒ごと自動保存</span>
         </div>
@@ -1789,13 +1815,10 @@ export default function Home() {
         {activeTab === "sales" && (
         <>
           {/* 売上取込ツールバー */}
-          <section className="panel p-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="btn btn-primary cursor-pointer">
-                📥 売上取込
-                {settings.market && (
-                  <span className="ml-1 text-[10px] opacity-80">({settings.market})</span>
-                )}
+          <section className="bg-[#f8f6fa] border border-[#b0aab8] rounded-sm p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="excel-btn excel-btn-primary cursor-pointer">
+                📥 売上取込（自動判定）
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/pdf"
@@ -1804,51 +1827,45 @@ export default function Home() {
                 />
               </label>
               <button
-                className="btn"
+                className="excel-btn"
                 onClick={exportSalesCsv}
               >
                 📤 CSV出力
               </button>
-              <span className="text-[11px] text-[var(--fg-muted)] leading-snug">
+              <span className="text-[17px] text-[var(--fg-muted)] leading-snug">
                 市場から受領したExcel/CSV/PDFの<strong>売り金額・手数料</strong>を、
                 出品番号または商品番号で一致する行に反映します。
-                {settings.market ? (
-                  <span className="text-[var(--fg-subtle)]">
-                    {" "}プロファイル: <strong>{settings.market}</strong>
-                  </span>
-                ) : (
-                  <span className="text-[var(--fg-subtle)]">
-                    {" "}(市場未設定 — 自動検出で取込みます)
-                  </span>
-                )}
+                <span className="text-[var(--fg-subtle)]">
+                  {" "}(読み込んだデータから市場形式を自動判定)
+                </span>
               </span>
             </div>
           </section>
 
-          <section className="panel overflow-hidden">
+          <section className="panel overflow-hidden !rounded-md !border-[1px] !border-[#b0aab8] !shadow-none">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-[var(--bg-subtle)] border-b border-[var(--border)]">
-                  <tr className="text-[var(--fg-muted)]">
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">代表</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">正面</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">商品番号</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">タイトル</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">状態</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">指値</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">バイヤー</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">売り金額</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">手数料</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">キャンペーン</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">不落札手数料</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">粗利</th>
-                    <th className="px-3 py-3 text-left font-semibold text-[11px] uppercase tracking-wide">粗利(CB込)</th>
+              <table className="w-full text-[21px] border-collapse">
+                <thead>
+                  <tr>
+                    <th className="text-left">代表</th>
+                    <th className="text-left">正面</th>
+                    <th className="text-left">商品番号</th>
+                    <th className="text-left">タイトル</th>
+                    <th className="text-left">状態</th>
+                    <th className="text-left">指値</th>
+                    <th className="text-left">バイヤー</th>
+                    <th className="text-left">売り金額</th>
+                    <th className="text-left">手数料</th>
+                    <th className="text-left">キャンペーン</th>
+                    <th className="text-left">不落札手数料</th>
+                    <th className="text-left">粗利</th>
+                    <th className="text-left">粗利(CB込)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.filter(r => r.itemNumber).length === 0 && (
                     <tr>
-                      <td colSpan={13} className="px-6 py-16 text-center text-[var(--fg-muted)] text-sm">
+                      <td colSpan={13} className="px-6 py-16 text-center text-[var(--fg-muted)] text-[21px]">
                         出品タブで商品を登録すると、ここに売上入力欄が表示されます。
                       </td>
                     </tr>
@@ -1898,7 +1915,7 @@ export default function Home() {
                               />
                             </a>
                           ) : (
-                            <div className="w-20 h-20 bg-[var(--bg-muted)] rounded-lg flex items-center justify-center text-[10px] text-[var(--fg-subtle)]">
+                            <div className="w-20 h-20 bg-[var(--bg-muted)] rounded-lg flex items-center justify-center text-[15px] text-[var(--fg-subtle)]">
                               no image
                             </div>
                           )}
@@ -1915,26 +1932,26 @@ export default function Home() {
                               />
                             </a>
                           ) : (
-                            <div className="w-20 h-20 bg-[var(--bg-muted)] rounded-lg flex items-center justify-center text-[10px] text-[var(--fg-subtle)]">
+                            <div className="w-20 h-20 bg-[var(--bg-muted)] rounded-lg flex items-center justify-center text-[15px] text-[var(--fg-subtle)]">
                               no image
                             </div>
                           )}
                         </td>
-                        <td className="px-3 py-2 align-top font-bold text-[13px] tabular-nums whitespace-nowrap">
+                        <td className="px-3 py-2 align-top font-bold text-[20px] tabular-nums whitespace-nowrap">
                           {row.itemNumber}
                           {row.listingNumber && (
-                            <div className="text-[10px] font-normal text-[var(--fg-muted)]">
+                            <div className="text-[15px] font-normal text-[var(--fg-muted)]">
                               出品: {row.listingNumber}
                             </div>
                           )}
                         </td>
-                        <td className="px-3 py-2 align-top text-[12px]" style={{ minWidth: 240, maxWidth: 340 }}>
-                          <div className="font-semibold">{row.brand || "-"}</div>
-                          <div className="text-[11px] text-[var(--fg-muted)] break-words leading-snug whitespace-pre-wrap">
+                        <td className="px-3 py-2 align-top" style={{ minWidth: 240, maxWidth: 380 }}>
+                          <div className="font-bold text-[20px]">{row.brand || "-"}</div>
+                          <div className="cell-title text-[var(--fg)] break-words whitespace-pre-wrap">
                             {titleText}
                           </div>
                         </td>
-                        <td className="px-3 py-2 align-top text-[11px]" style={{ minWidth: 140, maxWidth: 200 }}>
+                        <td className="px-3 py-2 align-top text-[17px]" style={{ minWidth: 140, maxWidth: 200 }}>
                           {(row.soldOut || row.tkb || row.broken || row.copy) && (
                             <div className="mb-1 flex flex-wrap gap-1">
                               {row.soldOut && <span className="badge badge-danger">売切</span>}
@@ -1947,10 +1964,10 @@ export default function Home() {
                             {row.condition || "-"}
                           </div>
                         </td>
-                        <td className="px-3 py-2 align-top tabular-nums font-semibold">
+                        <td className="px-3 py-2 align-top cell-amount">
                           {row.reservePrice || "-"}
                         </td>
-                        <td className="px-3 py-2 align-top">
+                        <td className="px-3 py-2 align-top cell-buyer">
                           {row.buyer || "-"}
                         </td>
                         <td className="px-3 py-2 align-top">
@@ -1959,7 +1976,7 @@ export default function Home() {
                             value={row.saleAmount}
                             onChange={e => updateRow(row.id, { saleAmount: e.target.value })}
                             placeholder="実売上"
-                            className="input input-sm w-28 tabular-nums"
+                            className="cell-input cell-amount w-28"
                             inputMode="numeric"
                           />
                         </td>
@@ -1969,7 +1986,7 @@ export default function Home() {
                             value={row.fee}
                             onChange={e => updateRow(row.id, { fee: e.target.value })}
                             placeholder="手数料"
-                            className="input input-sm w-24 tabular-nums"
+                            className="cell-input cell-amount w-24"
                             inputMode="numeric"
                           />
                         </td>
@@ -1979,21 +1996,21 @@ export default function Home() {
                             value={row.campaign}
                             onChange={e => updateRow(row.id, { campaign: e.target.value })}
                             placeholder="CB"
-                            className="input input-sm w-24 tabular-nums"
+                            className="cell-input cell-amount w-24"
                             inputMode="numeric"
                           />
                         </td>
-                        <td className="px-3 py-2 align-top tabular-nums text-sm">
+                        <td className="px-3 py-2 align-top cell-amount">
                           {getUnsoldFee(row) > 0 ? (
-                            <span className="font-semibold text-[var(--danger)]">{getUnsoldFee(row).toLocaleString()}</span>
+                            <span className="text-[var(--danger)]">{getUnsoldFee(row).toLocaleString()}</span>
                           ) : (
                             <span className="text-[var(--fg-subtle)]">-</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 align-top tabular-nums text-sm font-semibold">
+                        <td className="px-3 py-2 align-top cell-amount">
                           {getGrossProfit(row) ? Math.round(getGrossProfit(row)).toLocaleString() : <span className="text-[var(--fg-subtle)]">-</span>}
                         </td>
-                        <td className="px-3 py-2 align-top tabular-nums text-sm font-semibold">
+                        <td className="px-3 py-2 align-top cell-amount">
                           {getGrossProfitWithCB(row) !== getGrossProfit(row) ? (
                             <span className="text-[var(--success)]">{Math.round(getGrossProfitWithCB(row)).toLocaleString()}</span>
                           ) : (
@@ -2003,25 +2020,25 @@ export default function Home() {
                       </tr>
                       {isLast && (
                         <tr key="totals" className="border-t-2 border-[var(--fg)] bg-[var(--bg-subtle)]">
-                          <td colSpan={7} className="px-3 py-3 text-right font-bold text-xs uppercase tracking-wide text-[var(--fg-muted)]">
+                          <td colSpan={7} className="px-3 py-3 text-right font-bold text-[18px] uppercase tracking-wide text-[var(--fg-muted)]">
                             合計
                           </td>
-                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                          <td className="px-3 py-3 cell-amount font-bold">
                             {totalSaleAmount ? totalSaleAmount.toLocaleString() : "-"}
                           </td>
-                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                          <td className="px-3 py-3 cell-amount font-bold">
                             {totalFee ? totalFee.toLocaleString() : "-"}
                           </td>
-                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                          <td className="px-3 py-3 cell-amount font-bold">
                             {totalCampaign ? totalCampaign.toLocaleString() : "-"}
                           </td>
-                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                          <td className="px-3 py-3 cell-amount font-bold">
                             {totalUnsoldFee ? <span className="text-[var(--danger)]">{totalUnsoldFee.toLocaleString()}</span> : "-"}
                           </td>
-                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                          <td className="px-3 py-3 cell-amount font-bold">
                             {totalGrossProfit ? Math.round(totalGrossProfit).toLocaleString() : "-"}
                           </td>
-                          <td className="px-3 py-3 font-bold tabular-nums text-sm">
+                          <td className="px-3 py-3 cell-amount font-bold">
                             {totalGrossProfitCB !== totalGrossProfit ? (
                               <span className="text-[var(--success)]">{Math.round(totalGrossProfitCB).toLocaleString()}</span>
                             ) : "-"}

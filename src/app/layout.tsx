@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Reggae_One, Zen_Kaku_Gothic_New } from "next/font/google";
+import { Geist_Mono, Zen_Kaku_Gothic_New } from "next/font/google";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
@@ -7,15 +7,9 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const reggae = Reggae_One({
-  variable: "--font-display",
-  subsets: ["latin"],
-  weight: "400",
-});
-
 const zenKaku = Zen_Kaku_Gothic_New({
   variable: "--font-body",
-  subsets: ["latin"],
+  subsets: ["latin", "japanese"],
   weight: ["500", "700", "900"],
 });
 
@@ -32,7 +26,7 @@ export default function RootLayout({
   return (
     <html
       lang="ja"
-      className={`${geistMono.variable} ${reggae.variable} ${zenKaku.variable} h-full antialiased`}
+      className={`${geistMono.variable} ${zenKaku.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[var(--bg)] text-[var(--fg)]">
         {children}

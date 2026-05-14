@@ -97,7 +97,7 @@
   --radius-2xl: 22px;
   --radius-3xl: 28px;
 
-  --font-display: var(--font-display), "Reggae One", "Impact", sans-serif;
+  --font-display: var(--font-body), "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
   --font-sans: var(--font-body), "Hiragino Kaku Gothic ProN", "Meiryo", "M PLUS Rounded 1c", sans-serif;
   --font-mono: var(--font-geist-mono), monospace;
 }
@@ -115,18 +115,14 @@ html, body {
   text-rendering: optimizeLegibility;
 }
 
-/* ==== 極薄いパステル装飾 (邪魔しない程度) ==== */
+/* 全フォーム要素にフォント継承 */
+input, select, textarea, button, option {
+  font-family: inherit;
+}
+
+/* ==== 背景装飾は無効化 (Excel風クリーンUI) ==== */
 body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(ellipse 320px 140px at 8% 18%, rgba(255, 198, 214, 0.35), transparent 70%),
-    radial-gradient(ellipse 260px 120px at 88% 72%, rgba(184, 236, 236, 0.3), transparent 70%),
-    radial-gradient(ellipse 280px 120px at 72% 12%, rgba(216, 240, 176, 0.25), transparent 70%),
-    radial-gradient(ellipse 200px 90px at 20% 82%, rgba(217, 198, 240, 0.25), transparent 70%);
+  display: none;
 }
 header, main, section, div.fixed {
   position: relative;
@@ -151,15 +147,15 @@ header, main, section, div.fixed {
    ====================================================================== */
 
 h1, h2, h3, h4 {
-  font-family: var(--font-display);
-  font-weight: 400;
+  font-family: var(--font-sans);
+  font-weight: 700;
   color: var(--fg);
   letter-spacing: 0.01em;
   line-height: 1.15;
+  font-style: normal;
 }
-h1, h2 { font-style: italic; }
 
-.display { font-family: var(--font-display); font-style: italic; }
+.display { font-family: var(--font-sans); font-weight: 700; font-style: normal; }
 
 /* ======================================================================
    Component Primitives
@@ -175,13 +171,13 @@ h1, h2 { font-style: italic; }
      ========================= */
   .btn {
     @apply inline-flex items-center justify-center gap-2 px-7 py-3.5
-           text-[15px] font-black select-none whitespace-nowrap
+           text-[23px] font-black select-none whitespace-nowrap
            transition-all duration-150 ease-out
            focus-visible:outline-none
            disabled:opacity-50 disabled:cursor-not-allowed;
     font-family: var(--font-sans);
     font-weight: 900;
-    font-style: italic;
+    font-style: normal;
     letter-spacing: 0.02em;
     border: 3px solid var(--fg);
     border-radius: 14px;
@@ -247,7 +243,7 @@ h1, h2 { font-style: italic; }
   }
 
   .btn-sm {
-    @apply px-4 py-2 text-[12px];
+    @apply px-4 py-2 text-[18px];
     border-width: 2.5px;
     border-radius: 10px;
     box-shadow:
@@ -268,7 +264,7 @@ h1, h2 { font-style: italic; }
   }
 
   .btn-xs {
-    @apply px-2.5 py-1 text-[10px];
+    @apply px-2.5 py-1 text-[15px];
     border-width: 2px;
     border-radius: 8px;
     box-shadow:
@@ -288,7 +284,7 @@ h1, h2 { font-style: italic; }
      Input: 太枠 + 軽い凹み
      ========================= */
   .input {
-    @apply w-full px-4 py-2.5 text-[14px] font-bold transition-all duration-150
+    @apply w-full px-4 py-2.5 text-[21px] font-bold transition-all duration-150
            focus:outline-none;
     font-family: var(--font-sans);
     background: var(--surface);
@@ -310,7 +306,7 @@ h1, h2 { font-style: italic; }
       0 0 0 4px var(--ink-pink);
   }
   .input-sm {
-    @apply px-3 py-1.5 text-[12px];
+    @apply px-3 py-1.5 text-[18px];
     border-width: 2.5px;
     border-radius: 9px;
   }
@@ -342,10 +338,10 @@ h1, h2 { font-style: italic; }
      Badge
      ========================= */
   .badge {
-    @apply inline-flex items-center gap-0.5 px-2 py-0.5 text-[11px] font-black uppercase;
+    @apply inline-flex items-center gap-0.5 px-2 py-0.5 text-[17px] font-black uppercase;
     font-family: var(--font-sans);
     font-weight: 900;
-    font-style: italic;
+    font-style: normal;
     letter-spacing: 0.03em;
     background: var(--ink-yellow);
     color: var(--fg);
@@ -366,10 +362,10 @@ h1, h2 { font-style: italic; }
      Form label
      ========================= */
   .form-label {
-    @apply text-[11px] font-black uppercase;
+    @apply text-[17px] font-black uppercase;
     font-family: var(--font-sans);
     font-weight: 900;
-    font-style: italic;
+    font-style: normal;
     letter-spacing: 0.05em;
     color: var(--fg);
   }
@@ -394,8 +390,8 @@ h1, h2 { font-style: italic; }
     color: var(--fg);
     font-family: var(--font-sans);
     font-weight: 900;
-    font-style: italic;
-    font-size: 11px;
+    font-style: normal;
+    font-size: 17px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     border: 2px solid var(--fg);
@@ -409,31 +405,112 @@ h1, h2 { font-style: italic; }
 }
 
 /* ======================================================================
-   Tables
+   Excel風ボタン — フラット・コンパクト
    ====================================================================== */
 
-.panel table { background: transparent; }
+.excel-btn {
+  @apply inline-flex items-center justify-center gap-1 px-3 py-1
+         text-[18px] font-semibold select-none whitespace-nowrap
+         transition-colors duration-100
+         focus-visible:outline-none
+         disabled:opacity-50 disabled:cursor-not-allowed;
+  font-family: var(--font-sans);
+  background: linear-gradient(180deg, #ffffff 0%, #f0ece4 100%);
+  color: var(--fg);
+  border: 1px solid #b0aab8;
+  border-radius: 3px;
+}
+.excel-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #e8eefa 0%, #d8dcea 100%);
+  border-color: #8890a0;
+}
+.excel-btn:active:not(:disabled) {
+  background: #d0d4e0;
+}
+.excel-btn-primary {
+  background: linear-gradient(180deg, #e0eaff 0%, #c0d4f8 100%);
+  border-color: #80a0d0;
+}
+.excel-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #d0dfff 0%, #a8c0f0 100%);
+  border-color: #6080b8;
+}
+.excel-btn-danger {
+  background: linear-gradient(180deg, #fff0f0 0%, #f0d8d8 100%);
+  border-color: #c0a0a0;
+  color: #8b0000;
+}
+.excel-btn-danger:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ffe0e0 0%, #e8c0c0 100%);
+  border-color: #a08080;
+}
+
+/* ======================================================================
+   Tables — Excel風グリッドスタイル
+   ====================================================================== */
+
+.panel table { background: var(--surface); border-collapse: collapse; }
 .panel table th {
-  background: var(--ink-purple) !important;
+  background: #e8e4f0 !important;
   color: var(--fg) !important;
   font-family: var(--font-sans);
-  font-weight: 900;
-  font-style: italic;
-  font-size: 12px !important;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border-bottom: 3px solid var(--fg);
-  padding: 14px 12px !important;
+  font-weight: 800;
+  font-style: normal;
+  font-size: 18px !important;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  border: 1px solid #b0aab8;
+  padding: 6px 8px !important;
+  white-space: nowrap;
 }
 .panel table td {
   color: var(--fg);
-  font-weight: 600;
-  border-top: 2px solid var(--bg-muted);
-  padding: 10px;
-  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid #d5d0dc;
+  padding: 4px 6px;
+  font-size: 20px;
+  vertical-align: top;
 }
 .panel table tbody tr:hover {
-  background: var(--ink-yellow);
+  background: #eef4ff;
+}
+/* Excel風セル内インプット — 枠なしフラット */
+.panel table .cell-input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--fg);
+  padding: 2px 4px;
+  border-radius: 0;
+  box-shadow: none;
+  outline: none;
+}
+.panel table .cell-input:focus {
+  background: #fff8d0;
+  box-shadow: inset 0 0 0 2px #4a7dff;
+}
+.panel table .cell-input::placeholder {
+  color: #c0b8c8 !important;
+  font-weight: 400;
+}
+/* 金額セル — 大きめフォント */
+.cell-amount {
+  font-size: 23px !important;
+  font-weight: 700 !important;
+  font-variant-numeric: tabular-nums;
+}
+/* バイヤー名 — 大きめフォント */
+.cell-buyer {
+  font-size: 23px !important;
+  font-weight: 700 !important;
+}
+/* 商品タイトル — 大きめフォント */
+.cell-title {
+  font-size: 23px !important;
+  font-weight: 700 !important;
+  line-height: 1.4;
 }
 
 /* Code inline */
