@@ -377,14 +377,14 @@ function collectKomehyoRows(baseDir: string): ProfitRow[] {
     // 全sellSheetを一旦読み取り、実際に販売データがあるかチェック
     const sheetRows: Record<string, ProfitRow[]> = {};
     for (const ss of sellSheets) {
-      sheetRows[ss.name] = extractRows(wb.Sheets[ss.name], dateStr, ss.name);
+      sheetRows[ss.name] = extractRows(wb.Sheets[ss.name], dateStr, "コメ兵");
     }
 
     // itemSheetsの中で「売りデータが実際にある」シートを除外して、ジョイン用ソースにする
     // (sellヘッダーがあるが実データ0件のシートもジョイン用に使える)
     const joinSources: ProfitRow[] = [];
     for (const is_ of itemSheets) {
-      const rows = sheetRows[is_.name] ?? extractRows(wb.Sheets[is_.name], dateStr, is_.name);
+      const rows = sheetRows[is_.name] ?? extractRows(wb.Sheets[is_.name], dateStr, "コメ兵");
       const hasPurchaseRows = rows.some((r) => r.purchase > 0);
       if (hasPurchaseRows) {
         joinSources.push(...rows);
@@ -558,7 +558,7 @@ function collectTabaRows(baseDir: string): ProfitRow[] {
 
       allRows.push({
         date: dateStr,
-        source: sheetName,
+        source: "市場連盟",
         brand: String(brand || ""),
         itemName: String(itemName || ""),
         condition: String(getCellVal(ws, r, col.condition ?? -1) || ""),
@@ -914,7 +914,7 @@ function collectGenericRows(def: GenericMarketDef): ProfitRow[] {
       const hs = hasSellData(headers);
       const hp = hasPurchaseData(headers);
       if (!hs && !hp) continue;
-      const rows = extractRows(ws, dateStr, sn, { returnFee: def.returnFee || 0 });
+      const rows = extractRows(ws, dateStr, def.name, { returnFee: def.returnFee || 0 });
       sheetData.push({ name: sn, rows, hasSell: hs, hasPurchase: hp });
     }
 
@@ -1020,7 +1020,7 @@ const GENERIC_MARKETS: GenericMarketDef[] = [
     name: "プライム",
     baseDir: `${AGO_BASE}/プライム`,
     fileFilter: f => isExcel(f) && notTilde(f) && f.includes("社内用"),
-    sheetFilter: sn => sn.includes("まとめ") || sn === "Sheet1",
+    sheetFilter: sn => sn.includes("まとめ") || sn === "Sheet1" || sn === "元シート" || /^\d+$/.test(sn),
     returnFee: 0,
   },
   {
@@ -1057,6 +1057,54 @@ const GENERIC_MARKETS: GenericMarketDef[] = [
     id: "auc_net",
     name: "オークネット",
     baseDir: `${AGO_BASE}/その他市場/オークネット`,
+    fileFilter: f => isExcel(f) && notTilde(f),
+    returnFee: 0,
+  },
+  {
+    id: "yba",
+    name: "YBA",
+    baseDir: `${AGO_BASE}/YBA`,
+    fileFilter: f => isExcel(f) && notTilde(f) && (f.includes("社内") || f.includes("仕入")),
+    recursive: true,
+    sheetFilter: sn => sn.includes("まとめ") || /^\d+$/.test(sn),
+    returnFee: 0,
+  },
+  {
+    id: "rs",
+    name: "RS",
+    baseDir: `${AGO_BASE}/RS`,
+    fileFilter: f => isExcel(f) && notTilde(f) && f.includes("社内用"),
+    recursive: true,
+    sheetFilter: sn => sn.includes("出品表") || /^\d+$/.test(sn),
+    returnFee: 0,
+  },
+  {
+    id: "tokioka",
+    name: "トキオカ",
+    baseDir: `${AGO_BASE}/あご表ジュエリーチーム/トキオカ`,
+    fileFilter: f => isExcel(f) && notTilde(f),
+    sheetFilter: sn => sn === "入力欄",
+    returnFee: 0,
+  },
+  {
+    id: "second",
+    name: "セカンド",
+    baseDir: `${AGO_BASE}/セカンド`,
+    fileFilter: f => isExcel(f) && notTilde(f) && !f.includes("提出"),
+    returnFee: 0,
+  },
+  {
+    id: "kome_apparel",
+    name: "コメ兵アパレル",
+    baseDir: `${AGO_BASE}/コメ兵アパレル`,
+    fileFilter: f => isExcel(f) && notTilde(f) && f.includes("社内用"),
+    sheetFilter: sn => sn === "Sheet1" || sn.includes("原本"),
+    returnFee: 0,
+  },
+  {
+    id: "kameido",
+    name: "亀戸",
+    baseDir: `${AGO_BASE}/亀戸`,
     fileFilter: f => isExcel(f) && notTilde(f),
     returnFee: 0,
   },

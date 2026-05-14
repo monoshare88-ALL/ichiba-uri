@@ -118,13 +118,25 @@ const DEFAULT_MARKETS = [
 
 export default function AnalysisPage() {
   const [markets, setMarkets] = useState(DEFAULT_MARKETS);
-  const [market, setMarket] = useState("komehyo");
+  const [market, setMarket] = useState("all");
   const [data, setData] = useState<AnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // 現在の半期IDを算出
+  const currentPeriodId = useMemo(() => {
+    const now = new Date();
+    const yy = now.getFullYear() % 100;
+    const mm = now.getMonth() + 1;
+    if (mm >= 12 || mm <= 5) {
+      const fy = mm === 12 ? yy : yy - 1;
+      return `${fy}h1`;
+    }
+    return `${yy - 1}h2`;
+  }, []);
+
   // period filter: "all" | "h1" (12-5月) | "h2" (6-11月) | specific like "25h1"
-  const [filterPeriod, setFilterPeriod] = useState<string>("all");
+  const [filterPeriod, setFilterPeriod] = useState<string>(currentPeriodId);
 
   // filters
   const [filterDate, setFilterDate] = useState<string>("");
@@ -142,13 +154,14 @@ export default function AnalysisPage() {
 
   // tab
   const [activeTab, setActiveTab] = useState<"summary" | "items">("summary");
+  const [summarySubTab, setSummarySubTab] = useState<"brand" | "buyer">("buyer");
 
   const loadMarket = (id: string) => {
     setMarket(id);
     setData(null);
     setLoading(true);
     setError(null);
-    setFilterPeriod("all"); setFilterDate(""); setFilterBrand(""); setFilterBuyer(""); setFilterText(""); setFilterListingId(""); setFilterItemNo(""); setFilterCondition(""); setShowLossOnly(false);
+    setFilterPeriod(currentPeriodId); setFilterDate(""); setFilterBrand(""); setFilterBuyer(""); setFilterText(""); setFilterListingId(""); setFilterItemNo(""); setFilterCondition(""); setShowLossOnly(false);
     fetch(`/api/analysis?market=${id}`)
       .then((r) => r.json())
       .then((d) => {
@@ -169,7 +182,7 @@ export default function AnalysisPage() {
         }
       })
       .catch(() => {});
-    loadMarket("komehyo");
+    loadMarket("all");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -358,6 +371,29 @@ export default function AnalysisPage() {
   );
 
   // 半期フィルタ適用後の集計テーブル
+  // 市場別集計
+  const periodMarketSummary = useMemo<GroupSummary[]>(() => {
+    const items = periodFilteredItems;
+    const map = new Map<string, { count: number; lossCount: number; purchase: number; profit: number }>();
+    for (const r of items) {
+      const k = r.source || "(不明)";
+      const e = map.get(k) || { count: 0, lossCount: 0, purchase: 0, profit: 0 };
+      e.count++;
+      if (r.profit < 0) e.lossCount++;
+      e.purchase += r.purchaseTax;
+      e.profit += r.profit;
+      map.set(k, e);
+    }
+    return [...map.entries()].map(([name, v]) => ({
+      name,
+      count: v.count,
+      lossCount: v.lossCount,
+      purchase: Math.round(v.purchase),
+      profit: Math.round(v.profit),
+      profitRate: v.purchase > 0 ? Math.round((v.profit / v.purchase) * 1000) / 10 : 0,
+    })).sort((a, b) => b.count - a.count);
+  }, [periodFilteredItems]);
+
   const periodDateSummary = useMemo<DateSummary[]>(() => {
     const items = periodFilteredItems;
     const map = new Map<string, { count: number; lossCount: number; returnedCount: number; purchase: number; sale: number; profit: number }>();
@@ -466,244 +502,276 @@ export default function AnalysisPage() {
   const s = periodSummary || data.summary;
 
   return (
-    <div className="min-h-screen">
+    <div className="h-screen flex flex-col overflow-hidden">
       <AnalysisHeader marketName={marketName} marketTabs={marketTabs} />
 
-      <main className="max-w-[1920px] mx-auto px-4 md:px-6 py-6 space-y-6">
-        {/* 期間切替 */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[17px] font-semibold text-[var(--fg-muted)]">期間:</span>
-          <button onClick={() => setFilterPeriod("all")}
-            className={`excel-btn ${filterPeriod === "all" ? "excel-btn-primary" : ""}`}>
-            全期間
-          </button>
-          {availablePeriods.map(pid => (
-            <button key={pid} onClick={() => setFilterPeriod(pid)}
-              className={`excel-btn ${filterPeriod === pid ? "excel-btn-primary" : ""}`}>
-              {getPeriodLabel(pid)}
+      <main className="flex-1 flex flex-col overflow-hidden max-w-[1920px] w-full mx-auto px-3 md:px-4">
+        {/* 上部固定エリア */}
+        <div className="shrink-0 py-1.5 space-y-1.5">
+          {/* 期間切替 */}
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[17px] font-semibold text-[var(--fg-muted)]">期間:</span>
+            <button onClick={() => setFilterPeriod("all")}
+              className={`excel-btn ${filterPeriod === "all" ? "excel-btn-primary" : ""}`}>
+              全期間
             </button>
-          ))}
-        </div>
+            {availablePeriods.map(pid => (
+              <button key={pid} onClick={() => setFilterPeriod(pid)}
+                className={`excel-btn ${filterPeriod === pid ? "excel-btn-primary" : ""}`}>
+                {getPeriodLabel(pid)}
+              </button>
+            ))}
+          </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <SummaryCard
-            label="販売件数"
-            value={`${s.totalItems}件`}
-            sub={`赤字 ${s.totalLoss}件 / 引き ${s.totalReturned}件${s.totalReturnFee > 0 ? ` (手数料 ${yen(s.totalReturnFee)})` : ""}`}
-            color="var(--ink-cyan)"
-          />
-          <SummaryCard
-            label="仕入総額(税込)"
-            value={yen(s.totalPurchase)}
-            sub={`手数料 ${yen(s.totalFee)}`}
-            color="var(--ink-purple)"
-          />
-          <SummaryCard
-            label="利益総額"
-            value={yen(s.totalProfit)}
-            sub={`キャンペーン ${yen(s.totalCampaign)}`}
-            color={s.totalProfit >= 0 ? "var(--ink-lime)" : "var(--danger-soft)"}
-          />
-          <SummaryCard
-            label="利益率"
-            value={pct(s.profitRate)}
-            sub={`${s.totalItems - s.totalLoss}件黒字 / ${s.totalLoss}件赤字`}
-            color={s.profitRate >= 0 ? "var(--ink-yellow)" : "var(--danger-soft)"}
-          />
-        </div>
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <SummaryCard
+              label="販売件数"
+              value={`${s.totalItems}件`}
+              sub={`赤字 ${s.totalLoss}件 / 引き ${s.totalReturned}件${s.totalReturnFee > 0 ? ` (手数料 ${yen(s.totalReturnFee)})` : ""}`}
+              color="var(--ink-cyan)"
+            />
+            <SummaryCard
+              label="仕入総額(税込)"
+              value={yen(s.totalPurchase)}
+              sub={`手数料 ${yen(s.totalFee)}`}
+              color="var(--ink-purple)"
+            />
+            <SummaryCard
+              label="利益総額"
+              value={yen(s.totalProfit)}
+              sub={`キャンペーン ${yen(s.totalCampaign)}`}
+              color={s.totalProfit >= 0 ? "var(--ink-lime)" : "var(--danger-soft)"}
+            />
+            <SummaryCard
+              label="利益率"
+              value={pct(s.profitRate)}
+              sub={`${s.totalItems - s.totalLoss}件黒字 / ${s.totalLoss}件赤字`}
+              color={s.profitRate >= 0 ? "var(--ink-yellow)" : "var(--danger-soft)"}
+            />
+          </div>
 
-        {/* 引き手数料 半期別・バイヤー別内訳 (コメ兵のみ) */}
-        {returnPeriodSummary.length > 0 && (
-          <ReturnFeePeriodPanel periods={returnPeriodSummary} summary={s} />
-        )}
+          {/* 引き手数料 半期別・バイヤー別内訳 (コメ兵のみ) */}
+          {returnPeriodSummary.length > 0 && (
+            <ReturnFeePeriodPanel periods={returnPeriodSummary} summary={s} />
+          )}
 
-        {/* Tabs */}
-        <div className="flex items-center gap-2">
-          {marketTabs}
-          <div className="h-5 w-px bg-[#d5d0dc] mx-1" />
-          <button
-            onClick={() => setActiveTab("summary")}
-            className={`excel-btn ${activeTab === "summary" ? "excel-btn-primary" : ""}`}
-          >
-            集計
-          </button>
-          <button
-            onClick={() => setActiveTab("items")}
-            className={`excel-btn ${activeTab === "items" ? "excel-btn-primary" : ""}`}
-          >
-            商品一覧 ({data.items.length}件)
-          </button>
+          {/* Tabs */}
+          <div className="flex items-center gap-1.5">
+            {marketTabs}
+            <div className="h-5 w-px bg-[#d5d0dc] mx-0.5" />
+            <button
+              onClick={() => setActiveTab("summary")}
+              className={`excel-btn ${activeTab === "summary" ? "excel-btn-primary" : ""}`}
+            >
+              集計
+            </button>
+            <button
+              onClick={() => setActiveTab("items")}
+              className={`excel-btn ${activeTab === "items" ? "excel-btn-primary" : ""}`}
+            >
+              商品一覧 ({data.items.length}件)
+            </button>
+          </div>
         </div>
 
         {activeTab === "summary" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* Date Summary */}
-            <div className="border border-[#b0aab8] rounded-sm p-3 bg-white">
-              <h3 className="text-[27px] mb-3">日付別</h3>
-              <table className="w-full text-[21px] border-collapse border border-[#b0aab8]">
-                <thead>
-                  <tr className="bg-[#e8e4f0]">
-                    <th className="text-left border border-[#b0aab8] px-2 py-1">大会日</th>
-                    <th className="text-right border border-[#b0aab8] px-2 py-1">販売</th>
-                    <th className="text-right border border-[#b0aab8] px-2 py-1">赤字</th>
-                    <th className="text-right border border-[#b0aab8] px-2 py-1">利益</th>
-                    <th className="text-right border border-[#b0aab8] px-2 py-1">率</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {periodDateSummary.map((d) => (
-                    <tr
-                      key={d.date}
-                      className="cursor-pointer hover:bg-[#eef4ff]"
-                      onClick={() => { setFilterDate(d.date); setActiveTab("items"); }}
-                    >
-                      <td className="border border-[#d5d0dc] px-2 py-1">{dateLabel(d.date)}</td>
-                      <td className="text-right border border-[#d5d0dc] px-2 py-1">{d.count}</td>
-                      <td className="text-right border border-[#d5d0dc] px-2 py-1">{d.lossCount}</td>
-                      <td className={`text-right font-bold border border-[#d5d0dc] px-2 py-1 ${d.profit < 0 ? "text-[var(--danger)]" : ""}`}>
-                        {yen(d.profit)}
-                      </td>
-                      <td className={`text-right border border-[#d5d0dc] px-2 py-1 ${d.profitRate < 0 ? "text-[var(--danger)]" : ""}`}>
-                        {pct(d.profitRate)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-[#f0edf5]">
-                    <td className="font-bold border border-[#b0aab8] px-2 py-1">合計</td>
-                    <td className="text-right font-bold border border-[#b0aab8] px-2 py-1">{s.totalItems}</td>
-                    <td className="text-right font-bold border border-[#b0aab8] px-2 py-1">{s.totalLoss}</td>
-                    <td className={`text-right font-bold border border-[#b0aab8] px-2 py-1 ${s.totalProfit < 0 ? "text-[var(--danger)]" : ""}`}>
-                      {yen(s.totalProfit)}
-                    </td>
-                    <td className={`text-right font-bold border border-[#b0aab8] px-2 py-1 ${s.profitRate < 0 ? "text-[var(--danger)]" : ""}`}>
-                      {pct(s.profitRate)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-
-            {/* Brand Summary */}
-            <div className="border border-[#b0aab8] rounded-sm p-3 bg-white">
-              <h3 className="text-[27px] mb-3">ブランド別</h3>
-              <div className="max-h-[480px] overflow-y-auto">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-3 overflow-hidden pb-2">
+            {/* Market Summary (左・大きく) */}
+            <div className="border border-[#b0aab8] rounded-sm p-2 bg-white flex flex-col overflow-hidden">
+              <h3 className="text-[21px] mb-1 shrink-0">市場別</h3>
+              <div className="overflow-y-auto flex-1">
                 <table className="w-full text-[21px] border-collapse border border-[#b0aab8]">
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-[#e8e4f0]">
-                      <th className="text-left border border-[#b0aab8] px-2 py-1">ブランド</th>
+                      <th className="text-left border border-[#b0aab8] px-2 py-1">市場名</th>
                       <th className="text-right border border-[#b0aab8] px-2 py-1">件数</th>
+                      <th className="text-right border border-[#b0aab8] px-2 py-1">赤字</th>
+                      <th className="text-right border border-[#b0aab8] px-2 py-1">仕入</th>
                       <th className="text-right border border-[#b0aab8] px-2 py-1">利益</th>
                       <th className="text-right border border-[#b0aab8] px-2 py-1">率</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {periodBrandSummary.map((b) => (
+                    {periodMarketSummary.map((m) => (
                       <tr
-                        key={b.name}
+                        key={m.name}
                         className="cursor-pointer hover:bg-[#eef4ff]"
-                        onClick={() => { setFilterBrand(b.name); setActiveTab("items"); }}
+                        onClick={() => { setFilterText(m.name); setActiveTab("items"); }}
                       >
-                        <td className="max-w-[140px] truncate border border-[#d5d0dc] px-2 py-1" title={b.name}>{b.name}</td>
-                        <td className="text-right border border-[#d5d0dc] px-2 py-1">
-                          {b.count}
-                          {b.lossCount > 0 && <span className="text-[var(--fg-muted)] text-[15px] ml-0.5">({b.lossCount})</span>}
+                        <td className="border border-[#d5d0dc] px-2 py-1">{m.name}</td>
+                        <td className="text-right border border-[#d5d0dc] px-2 py-1">{m.count}</td>
+                        <td className="text-right border border-[#d5d0dc] px-2 py-1">{m.lossCount}</td>
+                        <td className="text-right border border-[#d5d0dc] px-2 py-1">{yen(m.purchase)}</td>
+                        <td className={`text-right font-bold border border-[#d5d0dc] px-2 py-1 ${m.profit < 0 ? "text-[var(--danger)]" : ""}`}>
+                          {yen(m.profit)}
                         </td>
-                        <td className={`text-right font-bold border border-[#d5d0dc] px-2 py-1 ${b.profit < 0 ? "text-[var(--danger)]" : ""}`}>
-                          {yen(b.profit)}
-                        </td>
-                        <td className={`text-right border border-[#d5d0dc] px-2 py-1 ${b.profitRate < 0 ? "text-[var(--danger)]" : ""}`}>
-                          {pct(b.profitRate)}
+                        <td className={`text-right border border-[#d5d0dc] px-2 py-1 ${m.profitRate < 0 ? "text-[var(--danger)]" : ""}`}>
+                          {pct(m.profitRate)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr className="bg-[#f0edf5]">
+                      <td className="font-bold border border-[#b0aab8] px-2 py-1">合計</td>
+                      <td className="text-right font-bold border border-[#b0aab8] px-2 py-1">{s.totalItems}</td>
+                      <td className="text-right font-bold border border-[#b0aab8] px-2 py-1">{s.totalLoss}</td>
+                      <td className="text-right font-bold border border-[#b0aab8] px-2 py-1">{yen(s.totalPurchase)}</td>
+                      <td className={`text-right font-bold border border-[#b0aab8] px-2 py-1 ${s.totalProfit < 0 ? "text-[var(--danger)]" : ""}`}>
+                        {yen(s.totalProfit)}
+                      </td>
+                      <td className={`text-right font-bold border border-[#b0aab8] px-2 py-1 ${s.profitRate < 0 ? "text-[var(--danger)]" : ""}`}>
+                        {pct(s.profitRate)}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>
 
-            {/* Buyer Summary */}
-            <div className="border border-[#b0aab8] rounded-sm p-3 bg-white">
-              <h3 className="text-[27px] mb-3">バイヤー別</h3>
-              <table className="w-full text-[21px] border-collapse border border-[#b0aab8]">
-                <thead>
-                  <tr className="bg-[#e8e4f0]">
-                    <th className="text-left border border-[#b0aab8] px-2 py-1">バイヤー</th>
-                    <th className="text-right border border-[#b0aab8] px-2 py-1">件数</th>
-                    <th className="text-right border border-[#b0aab8] px-2 py-1">仕入</th>
-                    <th className="text-right border border-[#b0aab8] px-2 py-1">利益</th>
-                    <th className="text-right border border-[#b0aab8] px-2 py-1">率</th>
-                    {s.totalReturnFee > 0 && (
-                      <>
-                        <th className="text-right border border-[#b0aab8] px-2 py-1">引き</th>
-                        <th className="text-right border border-[#b0aab8] px-2 py-1">引き手数料</th>
-                      </>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {periodBuyerSummary.map((b) => (
-                    <tr
-                      key={b.name}
-                      className="cursor-pointer hover:bg-[#eef4ff]"
-                      onClick={() => { setFilterBuyer(b.name); setActiveTab("items"); }}
-                    >
-                      <td className="border border-[#d5d0dc] px-2 py-1">
-                        {b.name}
-                        {(b.resaleCount || 0) > 0 && (
-                          <span className="text-[var(--fg-muted)] text-[15px] ml-1">再販{b.resaleCount}</span>
+            {/* Brand / Buyer 切替 (右) */}
+            <div className="border border-[#b0aab8] rounded-sm p-2 bg-white flex flex-col overflow-hidden">
+              <div className="flex items-end gap-0 mb-1 shrink-0">
+                <button
+                  onClick={() => setSummarySubTab("buyer")}
+                  className={`px-4 py-1.5 text-[20px] font-semibold border border-[#b0aab8] rounded-t-md transition-colors ${
+                    summarySubTab === "buyer"
+                      ? "bg-white border-b-white -mb-px z-10 relative"
+                      : "bg-[#e8e4f0] text-[var(--fg-muted)] hover:bg-[#f0edf5]"
+                  }`}
+                >
+                  バイヤー別
+                </button>
+                <button
+                  onClick={() => setSummarySubTab("brand")}
+                  className={`px-4 py-1.5 text-[20px] font-semibold border border-[#b0aab8] rounded-t-md transition-colors ${
+                    summarySubTab === "brand"
+                      ? "bg-white border-b-white -mb-px z-10 relative"
+                      : "bg-[#e8e4f0] text-[var(--fg-muted)] hover:bg-[#f0edf5]"
+                  }`}
+                >
+                  ブランド別
+                </button>
+              </div>
+
+              {summarySubTab === "brand" && (
+                <div className="overflow-y-auto flex-1">
+                  <table className="w-full text-[21px] border-collapse border border-[#b0aab8]">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="bg-[#e8e4f0]">
+                        <th className="text-left border border-[#b0aab8] px-2 py-1">ブランド</th>
+                        <th className="text-right border border-[#b0aab8] px-2 py-1">件数</th>
+                        <th className="text-right border border-[#b0aab8] px-2 py-1">利益</th>
+                        <th className="text-right border border-[#b0aab8] px-2 py-1">率</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {periodBrandSummary.map((b) => (
+                        <tr
+                          key={b.name}
+                          className="cursor-pointer hover:bg-[#eef4ff]"
+                          onClick={() => { setFilterBrand(b.name); setActiveTab("items"); }}
+                        >
+                          <td className="max-w-[180px] truncate border border-[#d5d0dc] px-2 py-1" title={b.name}>{b.name}</td>
+                          <td className="text-right border border-[#d5d0dc] px-2 py-1">
+                            {b.count}
+                            {b.lossCount > 0 && <span className="text-[var(--fg-muted)] text-[15px] ml-0.5">({b.lossCount})</span>}
+                          </td>
+                          <td className={`text-right font-bold border border-[#d5d0dc] px-2 py-1 ${b.profit < 0 ? "text-[var(--danger)]" : ""}`}>
+                            {yen(b.profit)}
+                          </td>
+                          <td className={`text-right border border-[#d5d0dc] px-2 py-1 ${b.profitRate < 0 ? "text-[var(--danger)]" : ""}`}>
+                            {pct(b.profitRate)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {summarySubTab === "buyer" && (
+                <div className="overflow-y-auto flex-1">
+                  <table className="w-full text-[21px] border-collapse border border-[#b0aab8]">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="bg-[#e8e4f0]">
+                        <th className="text-left border border-[#b0aab8] px-2 py-1">バイヤー</th>
+                        <th className="text-right border border-[#b0aab8] px-2 py-1">件数</th>
+                        <th className="text-right border border-[#b0aab8] px-2 py-1">仕入</th>
+                        <th className="text-right border border-[#b0aab8] px-2 py-1">利益</th>
+                        <th className="text-right border border-[#b0aab8] px-2 py-1">率</th>
+                        {s.totalReturnFee > 0 && (
+                          <>
+                            <th className="text-right border border-[#b0aab8] px-2 py-1">引き</th>
+                            <th className="text-right border border-[#b0aab8] px-2 py-1">引き手数料</th>
+                          </>
                         )}
-                      </td>
-                      <td className="text-right border border-[#d5d0dc] px-2 py-1">
-                        {b.count}
-                        {b.lossCount > 0 && <span className="text-[var(--fg-muted)] text-[15px] ml-0.5">({b.lossCount})</span>}
-                      </td>
-                      <td className="text-right border border-[#d5d0dc] px-2 py-1">{yen(b.purchase)}</td>
-                      <td className={`text-right font-bold border border-[#d5d0dc] px-2 py-1 ${b.profit < 0 ? "text-[var(--danger)]" : ""}`}>
-                        {yen(b.profit)}
-                      </td>
-                      <td className={`text-right border border-[#d5d0dc] px-2 py-1 ${b.profitRate < 0 ? "text-[var(--danger)]" : ""}`}>
-                        {pct(b.profitRate)}
-                      </td>
-                      {s.totalReturnFee > 0 && (
-                        <>
-                          <td className="text-right text-[var(--fg-muted)] border border-[#d5d0dc] px-2 py-1">
-                            {(b.returnCount || 0) > 0 ? `${b.returnCount}件` : ""}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {periodBuyerSummary.map((b) => (
+                        <tr
+                          key={b.name}
+                          className="cursor-pointer hover:bg-[#eef4ff]"
+                          onClick={() => { setFilterBuyer(b.name); setActiveTab("items"); }}
+                        >
+                          <td className="border border-[#d5d0dc] px-2 py-1">
+                            {b.name}
+                            {(b.resaleCount || 0) > 0 && (
+                              <span className="text-[var(--fg-muted)] text-[15px] ml-1">再販{b.resaleCount}</span>
+                            )}
                           </td>
-                          <td className="text-right text-[var(--fg-muted)] border border-[#d5d0dc] px-2 py-1">
-                            {(b.returnFee || 0) > 0 ? yen(b.returnFee || 0) : ""}
+                          <td className="text-right border border-[#d5d0dc] px-2 py-1">
+                            {b.count}
+                            {b.lossCount > 0 && <span className="text-[var(--fg-muted)] text-[15px] ml-0.5">({b.lossCount})</span>}
                           </td>
-                        </>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-                {s.totalReturnFee > 0 && (
-                  <tfoot>
-                    <tr className="bg-[#f0edf5]">
-                      <td className="font-bold border border-[#b0aab8] px-2 py-1">引き手数料合計</td>
-                      <td colSpan={4} className="border border-[#b0aab8] px-2 py-1"></td>
-                      <td className="text-right font-bold border border-[#b0aab8] px-2 py-1">
-                        {periodBuyerSummary.reduce((x, b) => x + (b.returnCount || 0), 0)}件
-                      </td>
-                      <td className="text-right font-bold border border-[#b0aab8] px-2 py-1">
-                        {yen(s.totalReturnFee)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
+                          <td className="text-right border border-[#d5d0dc] px-2 py-1">{yen(b.purchase)}</td>
+                          <td className={`text-right font-bold border border-[#d5d0dc] px-2 py-1 ${b.profit < 0 ? "text-[var(--danger)]" : ""}`}>
+                            {yen(b.profit)}
+                          </td>
+                          <td className={`text-right border border-[#d5d0dc] px-2 py-1 ${b.profitRate < 0 ? "text-[var(--danger)]" : ""}`}>
+                            {pct(b.profitRate)}
+                          </td>
+                          {s.totalReturnFee > 0 && (
+                            <>
+                              <td className="text-right text-[var(--fg-muted)] border border-[#d5d0dc] px-2 py-1">
+                                {(b.returnCount || 0) > 0 ? `${b.returnCount}件` : ""}
+                              </td>
+                              <td className="text-right text-[var(--fg-muted)] border border-[#d5d0dc] px-2 py-1">
+                                {(b.returnFee || 0) > 0 ? yen(b.returnFee || 0) : ""}
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                    {s.totalReturnFee > 0 && (
+                      <tfoot>
+                        <tr className="bg-[#f0edf5]">
+                          <td className="font-bold border border-[#b0aab8] px-2 py-1">引き手数料合計</td>
+                          <td colSpan={4} className="border border-[#b0aab8] px-2 py-1"></td>
+                          <td className="text-right font-bold border border-[#b0aab8] px-2 py-1">
+                            {periodBuyerSummary.reduce((x, b) => x + (b.returnCount || 0), 0)}件
+                          </td>
+                          <td className="text-right font-bold border border-[#b0aab8] px-2 py-1">
+                            {yen(s.totalReturnFee)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {activeTab === "items" && (
-          <div className="space-y-3">
+          <div className="flex-1 flex flex-col overflow-hidden pb-2 gap-1.5">
             {/* Filters */}
-            <div className="border border-[#b0aab8] rounded-sm p-2 bg-[#f8f6fa]">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="shrink-0 border border-[#b0aab8] rounded-sm p-1.5 bg-[#f8f6fa]">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <select
                   value={filterDate}
                   onChange={(e) => setFilterDate(e.target.value)}
@@ -774,9 +842,9 @@ export default function AnalysisPage() {
             </div>
 
             {/* Items Table */}
-            <div className="border border-[#b0aab8] rounded-sm bg-white overflow-x-auto">
+            <div className="flex-1 border border-[#b0aab8] rounded-sm bg-white overflow-auto">
               <table className="w-full text-[21px] whitespace-nowrap border-collapse border border-[#b0aab8]">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-[#e8e4f0]">
                     <Th label="日付" sortKey="date" current={sortKey} dir={sortDir} onClick={handleSort} indicator={sortIndicator} />
                     <Th label="出品番号" sortKey="listingId" current={sortKey} dir={sortDir} onClick={handleSort} indicator={sortIndicator} />
@@ -893,12 +961,12 @@ export default function AnalysisPage() {
 
 function SummaryCard({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
   return (
-    <div className="border border-[#b0aab8] rounded-sm p-3" style={{ background: color }}>
-      <p className="text-[17px] font-bold text-[var(--fg-muted)]">{label}</p>
-      <p className="text-[36px] font-black mt-1 tabular-nums" style={{ fontStyle: "normal" }}>
+    <div className="border border-[#b0aab8] rounded-sm px-3 py-1.5" style={{ background: color }}>
+      <p className="text-[15px] font-bold text-[var(--fg-muted)]">{label}</p>
+      <p className="text-[30px] font-black tabular-nums leading-tight" style={{ fontStyle: "normal" }}>
         {value}
       </p>
-      <p className="text-[17px] text-[var(--fg-muted)] mt-1">{sub}</p>
+      <p className="text-[14px] text-[var(--fg-muted)]">{sub}</p>
     </div>
   );
 }
